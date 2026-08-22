@@ -1,0 +1,13 @@
+{
+  "name": "aisummoner-browser-acceptance",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test --config=playwright.config.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.60.0",
+    "@types/node": "24.13.3"
+  }
+}

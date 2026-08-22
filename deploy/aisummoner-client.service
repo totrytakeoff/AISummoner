@@ -1,0 +1,32 @@
+[Unit]
+Description=AISummoner Remote Client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aisummoner
+Group=aisummoner
+EnvironmentFile=/etc/aisummoner/client.env
+StateDirectory=aisummoner-client
+StateDirectoryMode=0700
+UMask=0077
+# Pairing codes are deliberately kept out of the journal. The private state
+# directory plus UMask creates this append target as the service user at 0600.
+StandardOutput=append:/var/lib/aisummoner-client/pairing-output.log
+StandardError=journal
+ExecStart=/usr/local/bin/aisummoner-client start --server ${AISUMMONER_SERVER_URL} --data-dir /var/lib/aisummoner-client
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

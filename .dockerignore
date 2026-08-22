@@ -1,0 +1,38 @@
+# Keep credentials, runtime state, VCS metadata, and locally generated output
+# out of every Docker build context. The production Dockerfiles copy only the
+# source files they need; these rules are an additional defense-in-depth layer.
+.git
+.git/**
+.env
+.env.*
+!.env.example
+
+data
+data/**
+**/data/**
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.wal
+*.log
+*.key
+*.pem
+*.crt
+
+node_modules
+node_modules/**
+web/node_modules
+web/node_modules/**
+web/dist
+web/dist/**
+dist
+dist/**
+bin
+bin/**
+coverage
+coverage/**
+*.test
+*.out
+aisummoner-server
+aisummoner-client

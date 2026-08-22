@@ -1,0 +1,115 @@
+name: aisummoner
+
+services:
+  server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: server
+    image: aisummoner-server:${AISUMMONER_IMAGE_TAG:-mvp0}
+    user: "10001:10001"
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700
+    environment:
+      AISUMMONER_BASE_URL: "https://${AISUMMONER_HOSTNAME:?set AISUMMONER_HOSTNAME}"
+      AISUMMONER_LISTEN_ADDR: "0.0.0.0:8080"
+      AISUMMONER_TRUSTED_PROXY_IPS: "${AISUMMONER_CADDY_EDGE_IP:-172.30.0.20}"
+      AISUMMONER_DATA_DIR: /var/lib/aisummoner/data
+      AISUMMONER_ADMIN_PASSWORD: "${AISUMMONER_ADMIN_PASSWORD:-}"
+      AISUMMONER_SESSION_SECRET: "${AISUMMONER_SESSION_SECRET:?set AISUMMONER_SESSION_SECRET}"
+      AISUMMONER_PAIRING_SECRET: "${AISUMMONER_PAIRING_SECRET:?set AISUMMONER_PAIRING_SECRET}"
+      AISUMMONER_AGENT_ADAPTER: "${AISUMMONER_AGENT_ADAPTER:-fake}"
+      AISUMMONER_DEEPSEEK_URL: "${AISUMMONER_DEEPSEEK_URL:-https://api.deepseek.com}"
+      AISUMMONER_DEEPSEEK_API_KEY: "${AISUMMONER_DEEPSEEK_API_KEY:-}"
+      AISUMMONER_DEEPSEEK_MODEL: "${AISUMMONER_DEEPSEEK_MODEL:-}"
+      AISUMMONER_AGENT_WORKSPACE_ROOT: /var/lib/aisummoner/workspaces
+      AISUMMONER_OPENCODE_URL: http://127.0.0.1:4096
+      AISUMMONER_OPENCODE_USERNAME: "${AISUMMONER_OPENCODE_USERNAME:-}"
+      AISUMMONER_OPENCODE_PASSWORD: "${AISUMMONER_OPENCODE_PASSWORD:-}"
+      AISUMMONER_OPENCODE_MODEL: "${AISUMMONER_OPENCODE_MODEL:-}"
+      AISUMMONER_AGENT_BRIDGE_LISTEN_ADDR: 127.0.0.1:4097
+      AISUMMONER_OPENCODE_BRIDGE_URL: http://127.0.0.1:4097/internal/opencode/remote-exec
+      AISUMMONER_AGENT_BRIDGE_SECRET: "${AISUMMONER_AGENT_BRIDGE_SECRET:-}"
+    volumes:
+      - server-data:/var/lib/aisummoner/data
+      - agent-workspaces:/var/lib/aisummoner/workspaces
+    networks:
+      edge:
+        ipv4_address: "${AISUMMONER_SERVER_EDGE_IP:-172.30.0.10}"
+    healthcheck:
+      # BusyBox wget --spider may issue HEAD, while /healthz intentionally
+      # accepts GET only. `-O /dev/null` performs a real GET.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 15s
+    stop_grace_period: 20s
+
+  opencode:
+    build:
+      context: ..
+      dockerfile: deploy/OpenCode.Dockerfile
+      args:
+        OPENCODE_VERSION: "1.18.11"
+    image: aisummoner-opencode:1.18.11
+    profiles: ["opencode"]
+    user: "10001:10001"
+    network_mode: "service:server"
+    depends_on:
+      server:
+        condition: service_started
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m,uid=10001,gid=10001,mode=0700
+    environment:
+      HOME: /tmp
+      OPENCODE_SERVER_USERNAME: "${AISUMMONER_OPENCODE_USERNAME:-}"
+      OPENCODE_SERVER_PASSWORD: "${AISUMMONER_OPENCODE_PASSWORD:-}"
+      AISUMMONER_OPENCODE_BRIDGE_URL: http://127.0.0.1:4097/internal/opencode/remote-exec
+      AISUMMONER_AGENT_BRIDGE_SECRET: "${AISUMMONER_AGENT_BRIDGE_SECRET:-}"
+    command: ["serve", "--hostname", "127.0.0.1", "--port", "4096"]
+    volumes:
+      - agent-workspaces:/var/lib/aisummoner/workspaces
+
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      AISUMMONER_HOSTNAME: "${AISUMMONER_HOSTNAME:?set AISUMMONER_HOSTNAME}"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      edge:
+        ipv4_address: "${AISUMMONER_CADDY_EDGE_IP:-172.30.0.20}"
+
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: "${AISUMMONER_EDGE_SUBNET:-172.30.0.0/24}"
+
+volumes:
+  server-data: {}
+  agent-workspaces: {}
+  caddy-data: {}
+  caddy-config: {}

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=AISummoner Client
+Comment=Connect this Linux device to an AISummoner Server
+Exec=aisummoner-client
+Icon=aisummoner-client
+Terminal=true
+Categories=Network;
+Keywords=remote;terminal;agent;

@@ -1,0 +1,32 @@
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Runtime data
+data/
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# Go
+/bin/
+/dist/
+aisummoner-server
+aisummoner-client
+coverage.out
+
+# Web
+web/node_modules/
+web/dist/
+web/playwright-report/
+web/test-results/
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+*.swp

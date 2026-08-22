@@ -1,0 +1,11 @@
+{$AISUMMONER_HOSTNAME} {
+	encode zstd gzip
+
+	reverse_proxy server:8080 {
+		# Overwrite the dedicated provenance header with Caddy's direct peer.
+		header_up X-AISummoner-Client-IP {remote_host}
+		# Disable proxy response buffering so Agent SSE is delivered immediately.
+		# Caddy upgrades WebSocket requests automatically.
+		flush_interval -1
+	}
+}
