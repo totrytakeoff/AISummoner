@@ -61,6 +61,39 @@ func TestResolveTunnelURLRequiresExplicitDevModeAndLiteralLoopbackForPlaintext(t
 	}
 }
 
+func TestClientStateCallbacksReportRetryAndJoinedStop(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		http.Error(writer, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	states := make([]StateNotification, 0, 3)
+	client, err := NewClient(ClientOptions{
+		ServerURL: server.URL, DevMode: true, Identity: testIdentity(t),
+		DeviceName: "state-device", Platform: "linux", Arch: "amd64", ClientVersion: "test",
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Jitter: func(time.Duration) time.Duration { return time.Hour },
+		OnState: func(notification StateNotification) {
+			states = append(states, notification)
+			if notification.Phase == ClientPhaseRetrying {
+				cancel()
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(states) != 3 || states[0].Phase != ClientPhaseConnecting ||
+		states[1].Phase != ClientPhaseRetrying || states[2].Phase != ClientPhaseStopped {
+		t.Fatalf("state callbacks = %+v", states)
+	}
+	if states[1].ErrorCategory != "protocol_or_transport_error" || states[1].RetryIn != time.Hour {
+		t.Fatalf("retry callback = %+v", states[1])
+	}
+}
+
 func TestNewClientClonesHTTPClientAndDisablesRedirectsWithoutMutation(t *testing.T) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -444,8 +477,10 @@ func TestAuthenticatedRunJoinsStreamHandlersOnEveryExit(t *testing.T) {
 			handlerStarted := make(chan struct{})
 			releaseHandler := make(chan struct{})
 			handlerExited := make(chan struct{})
+			streamEvents := make(chan StreamNotification, 2)
 			client := &Client{
 				connectTimeout: time.Second,
+				onStream:       func(notification StreamNotification) { streamEvents <- notification },
 				streamHandler: func(ctx context.Context, stream net.Conn, _ protocol.StreamHeader, _ ClientSession) {
 					defer close(handlerExited)
 					defer stream.Close()
@@ -477,6 +512,9 @@ func TestAuthenticatedRunJoinsStreamHandlersOnEveryExit(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Fatal("stream handler did not start")
 			}
+			if notification := <-streamEvents; !notification.Opened {
+				t.Fatalf("first stream notification = %+v", notification)
+			}
 			test.stop(cancel, serverSession)
 			select {
 			case err := <-runDone:
@@ -488,6 +526,9 @@ func TestAuthenticatedRunJoinsStreamHandlersOnEveryExit(t *testing.T) {
 			case <-handlerExited:
 			case <-time.After(time.Second):
 				t.Fatal("stream handler did not exit")
+			}
+			if notification := <-streamEvents; notification.Opened {
+				t.Fatalf("final stream notification = %+v", notification)
 			}
 			select {
 			case <-runDone:

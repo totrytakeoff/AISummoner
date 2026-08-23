@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=AISummoner Remote
+Comment=Connect this Linux device securely to AISummoner
+Exec=aisummoner-client-ui
+Icon=aisummoner-remote
+Terminal=false
+Categories=Network;
+Keywords=remote;terminal;agent;device;
+StartupWMClass=RemoteClient

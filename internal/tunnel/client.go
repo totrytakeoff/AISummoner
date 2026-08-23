@@ -33,6 +33,25 @@ type PairingNotification struct {
 	ExpiresAt time.Time
 }
 
+type ClientPhase string
+
+const (
+	ClientPhaseConnecting ClientPhase = "connecting"
+	ClientPhaseOnline     ClientPhase = "online"
+	ClientPhaseRetrying   ClientPhase = "retrying"
+	ClientPhaseStopped    ClientPhase = "stopped"
+)
+
+type StateNotification struct {
+	Phase         ClientPhase
+	RetryIn       time.Duration
+	ErrorCategory string
+}
+
+type StreamNotification struct {
+	Opened bool
+}
+
 type ClientSession struct {
 	ConnectionID       string
 	SSHClientPublicKey ssh.PublicKey
@@ -52,6 +71,8 @@ type ClientOptions struct {
 	Logger         *slog.Logger
 	OnPairing      func(PairingNotification)
 	OnOnline       func(ClientSession)
+	OnState        func(StateNotification)
+	OnStream       func(StreamNotification)
 	StreamHandler  StreamHandler
 	StableOnline   time.Duration
 	ConnectTimeout time.Duration
@@ -69,6 +90,8 @@ type Client struct {
 	logger         *slog.Logger
 	onPairing      func(PairingNotification)
 	onOnline       func(ClientSession)
+	onState        func(StateNotification)
+	onStream       func(StreamNotification)
 	streamHandler  StreamHandler
 	stableOnline   time.Duration
 	connectTimeout time.Duration
@@ -104,6 +127,12 @@ func NewClient(options ClientOptions) (*Client, error) {
 	if options.OnOnline == nil {
 		options.OnOnline = func(ClientSession) {}
 	}
+	if options.OnState == nil {
+		options.OnState = func(StateNotification) {}
+	}
+	if options.OnStream == nil {
+		options.OnStream = func(StreamNotification) {}
+	}
 	if options.StableOnline <= 0 {
 		options.StableOnline = 30 * time.Second
 	}
@@ -117,16 +146,19 @@ func NewClient(options ClientOptions) (*Client, error) {
 		endpoint: endpoint, identity: options.Identity, deviceName: options.DeviceName,
 		platform: options.Platform, arch: options.Arch, clientVersion: options.ClientVersion,
 		httpClient: &httpClient, logger: options.Logger, onPairing: options.OnPairing,
-		onOnline: options.OnOnline, streamHandler: options.StreamHandler,
-		stableOnline: options.StableOnline, connectTimeout: options.ConnectTimeout, jitter: options.Jitter,
+		onOnline: options.OnOnline, onState: options.OnState, onStream: options.OnStream,
+		streamHandler: options.StreamHandler,
+		stableOnline:  options.StableOnline, connectTimeout: options.ConnectTimeout, jitter: options.Jitter,
 	}, nil
 }
 
 // Run maintains the tunnel until ctx is canceled, using bounded jittered
 // exponential reconnect. Cancellation is a normal shutdown and returns nil.
 func (c *Client) Run(ctx context.Context) error {
+	defer c.notifyState(StateNotification{Phase: ClientPhaseStopped})
 	backoffIndex := 0
 	for {
+		c.notifyState(StateNotification{Phase: ClientPhaseConnecting})
 		onlineFor, err := c.runOnce(ctx)
 		if ctx.Err() != nil {
 			return nil
@@ -138,7 +170,9 @@ func (c *Client) Run(ctx context.Context) error {
 		if backoffIndex < 4 {
 			backoffIndex++
 		}
-		c.logger.Warn("device tunnel disconnected", "retry_in", delay, "error", publicTunnelError(err))
+		errorCategory := publicTunnelError(err)
+		c.notifyState(StateNotification{Phase: ClientPhaseRetrying, RetryIn: delay, ErrorCategory: errorCategory})
+		c.logger.Warn("device tunnel disconnected", "retry_in", delay, "error", errorCategory)
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
@@ -240,6 +274,7 @@ func (c *Client) runOnce(ctx context.Context) (time.Duration, error) {
 		return 0, err
 	}
 	c.onOnline(clientSession)
+	c.notifyState(StateNotification{Phase: ClientPhaseOnline})
 	err = c.runAuthenticated(ctx, session, control, codec, clientSession, time.Duration(authenticated.HeartbeatInterval)*time.Millisecond)
 	return time.Since(onlineAt), err
 }
@@ -402,6 +437,8 @@ func (c *Client) acceptStreams(ctx context.Context, done <-chan struct{}, sessio
 		handlers.Add(1)
 		go func() {
 			defer handlers.Done()
+			c.notifyStream(StreamNotification{Opened: true})
+			defer c.notifyStream(StreamNotification{Opened: false})
 			c.streamHandler(ctx, stream, header, clientSession)
 		}()
 	}
@@ -467,6 +504,18 @@ func ResolveTunnelURL(serverURL string, development bool) (string, error) {
 func literalLoopbackHost(host string) bool {
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+func (c *Client) notifyState(notification StateNotification) {
+	if c.onState != nil {
+		c.onState(notification)
+	}
+}
+
+func (c *Client) notifyStream(notification StreamNotification) {
+	if c.onStream != nil {
+		c.onStream(notification)
+	}
 }
 
 func parseConnectionPublicKey(encoded string) (ssh.PublicKey, error) {

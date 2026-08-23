@@ -1,39 +1,82 @@
 ---
 type: roadmap
 status: active
-updated_by: task014_implementation
+updated_by: planner
 ---
 
 # Roadmap
 
-## Phase 1: Foundation
+## Completed: MVP-0 Vertical Slice
 
-- [x] task001: Go module, configuration, IDs, SQLite, auth, pairing, device HTTP API.
-- [x] task002: Device identity, WSS/yamux control tunnel, heartbeat, reconnect, connection manager (approved revision 2).
-- [x] task003: Embedded SSHD, strict SSH client verification, exec and PTY lifecycle (approved revision 2).
+- [x] task001-task010: foundation, Tunnel/SSH, Terminal/Agent, composition,
+  hardening, three-host E2E and independent approval.
+- [x] task011: bounded ASD deployment and Linux x86_64 CLI AppImage.
+- [x] task012-task014: ordered Agent interaction, direct DeepSeek and removal of
+  the cumulative tool-count wall.
+- [x] Human proof: Terminal and direct DeepSeek Agent completed the real Remote
+  chain; the user declared the MVP loop complete.
 
-## Phase 2: Product Surfaces
+## Alpha A0: Direction And Repository Hygiene
 
-- [x] task004: React WebUI for login, pairing, devices, terminal and Agent activity (approved revision 1).
-- [x] task005: Terminal WebSocket gateway and xterm integration (approved revision 1).
-- [x] task006: Agent domain, approval state machine, Fake Adapter, SSE API (approved revision 2).
-- [x] task007: OpenCode sidecar adapter, custom `remote_exec` tool and bridge (approved revision 0).
+- [x] Freeze Alpha product direction and dual-client/runtime ADR.
+- [x] Correct root-binary ignore rules so `cmd/` source is visible to Git.
+- [x] Human priority amendment: Remote Client first; Qt 6 Widgets selected.
+- [x] External no-write Claude UI review distilled into the Qt design spec.
 
-## Phase 3: Integration And Delivery
+## Alpha A1: Remote Core Daemon And IPC
 
-- [x] task008: Full lifecycle, Server composition, static embed and deployment assets (approved revision 0).
-- [x] task009: Integration review, trusted-proxy/resource hardening and merged verification (approved revision 2).
-- [x] task010: Local build/test, ASD-Host/lzr-host deployment, three-host E2E and acceptance record (approved revision 2 on authorized TCP 10001).
-- [x] task011: Bounded ASD test deployment and Linux x86_64 Client AppImage handoff.
-- [x] task012: Provider-neutral ordered Agent timeline and DSH-inspired Web interaction (implemented; review pending).
-- [x] task013: Reliable OpenCode Turn completion and resumable Agent conversation (implemented; review pending).
-- [x] task014: Direct DeepSeek streaming Adapter, Web memory-only key entry,
-  no-wizard native Agent interaction and no cumulative Turn tool-count wall;
-  deployed and human-confirmed across the real Remote chain.
+- [x] task015: reusable Remote state machine around the existing Tunnel/SSHD.
+- [x] Same-UID mode-0600 Unix socket with status/events/pause/resume/pairing
+  refresh.
+- [x] Bounded sanitized local event ring and generic active control-session count.
+- [x] Preserve legacy headless `start`; update systemd to daemon mode.
 
-## Later
+## Alpha A2: Qt Remote Desktop Client
 
-- [ ] Agent UX: planning efficiency, context compaction, cancel/regenerate,
-  richer Markdown/code output and additional provider presentation adapters.
-- [ ] Alpha hardening: runtime containers, session recovery, key rotation, installers and update path.
-- [ ] File/port features, multi-user authorization and desktop assistance remain out of MVP-0.
+- [ ] task016: Qt 6 Widgets status/events/settings application.
+- [ ] Pairing code/countdown/copy/refresh, connection/controlled status,
+  pause/resume and daemon recovery.
+- [ ] Light/dark/system theme and Apple-like quiet visual system without custom
+  window chrome, QML or WebEngine.
+- [ ] GUI+daemon AppImage and non-root Ubuntu E2E; GUI exit leaves daemon alive.
+
+## Alpha A3: Controller Workspace Foundation
+
+- [ ] Device Hub → Control Workspace navigation.
+- [ ] Owner-scoped bounded recent Session index.
+- [ ] Left Session rail, center Agent surface, optional right Terminal/Device
+  dock; accessible resize/collapse/maximize and mobile fallback.
+- [ ] Provider setup in Controller settings with no Browser secret persistence.
+
+## Alpha A4: Agent Domain/UI v2 And DSH
+
+- [ ] Standard event v2, Capability Descriptor and Runtime Session lifecycle.
+- [ ] DSH-inspired conversation nodes, tool renderers, planning/question/status,
+  cancel/steer/retry/queue and richer Markdown/code/diff UX.
+- [ ] Pinned DSH adapter with Server-local tools disabled and AISummoner Remote
+  capabilities injected.
+
+## Alpha A5-A7: Runtime Adapters
+
+- [ ] A5 OpenCode rich Session/Turn/cancel/usage/permission mapping.
+- [ ] A6 Codex App Server over stdio/Unix socket with generated pinned schema.
+- [ ] A7 Claude Agent SDK streaming input, permission and resume mapping.
+- [ ] Maintain direct DeepSeek as lightweight API Adapter and Fake as
+  deterministic test infrastructure.
+
+## Alpha A8 And Later
+
+- [ ] Structured Remote file read/search/write/patch/diff.
+- [ ] Remote local restrictive permissions.
+- [ ] Desktop viewing/input only after a dedicated threat model and ADR.
+- [ ] Multi-user/RBAC, clustering, port forwarding and arbitrary IDE docking
+  remain separate future programs.
+
+## Cross-Phase Release Gates
+
+- Preserve TLS, Device identity, owner, SSH verification, approval, limits,
+  redaction and joined cleanup.
+- Every Runtime is pinned and has fixture/error/cancel/secret tests plus one real
+  Remote proof.
+- Every client milestone ships rollback, exact hashes and Ubuntu non-root proof.
+- Go race, Qt/Node build and Docker work stay serialized behind resource gates.

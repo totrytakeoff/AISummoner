@@ -14,9 +14,10 @@ data/
 
 # Go
 /bin/
+/build/
 /dist/
-aisummoner-server
-aisummoner-client
+/aisummoner-server
+/aisummoner-client
 coverage.out
 
 # Web

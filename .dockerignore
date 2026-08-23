@@ -28,6 +28,8 @@ web/dist
 web/dist/**
 dist
 dist/**
+build
+build/**
 bin
 bin/**
 coverage

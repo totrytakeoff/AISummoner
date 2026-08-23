@@ -2,15 +2,47 @@
 
 AISummoner 是一个以服务端 AI Agent 和 SSH 为核心的远程执行平台：被控端主动连接服务端，用户从浏览器完成设备配对、远程终端操作和 Agent 对话。
 
-当前阶段的目标不是交付成熟远控产品，而是在 **3 个连续开发日**内跑通可演示的 MVP-0 核心闭环。
+MVP-0 已完成真实纵向链路验证。当前进入 Alpha 规划与重构阶段：保留已经验证的
+远程安全底座，重做 Browser Controller 的工作区/Agent 交互，并把命令行 Remote
+Client 演进为带独立守护核心的桌面客户端。
 
 ## 当前基线
 
-- 基线版本：`MVP-0 / Baseline 0.1`
-- 基线日期：`2026-08-12`
+- 已完成基线：`MVP-0 / Baseline 0.1`
+- 当前方向：`Alpha / Direction 0.1`
+- Alpha 方向日期：`2026-08-23`
 - 支持平台：Linux Remote Client
 - 部署模型：单节点、单管理员、自托管
 - 交付口径：功能闭环 Demo，不承诺公网生产可用性
+
+## Alpha 重构方向（2026-08-23）
+
+MVP 证明了链路，不代表当前两个客户端已经是最终产品。后续主线固定为：
+
+```text
+登录 → 选择或绑定 Device → Control Workspace
+
+Control Workspace:
+  左侧 Session
+  中间 Agent Conversation
+  右侧可选 Terminal / Device Activity / 未来 Desktop
+```
+
+Controller 的 Agent 体验以 DSH 为主要交互参考，并采用类似 VS Code/Zed 的
+可调整工作区；不会直接 fork/iframe DSH，也不会引入第二套 Session、权限或本地
+执行后端。丰富 Runtime 适配顺序为 `DSH → OpenCode → Codex → Claude Code`，
+直接 DeepSeek 继续作为轻量模型 API Adapter。
+
+Remote Client 已演进为 `Go daemon + 私有本地 IPC + Qt Desktop UI`：GUI 提供
+配对码与过期刷新、连接/被控状态、脱敏活动记录、手动暂停/恢复；关闭 GUI 不会关闭
+后台 Tunnel。后续本机权限只能进一步收紧 Server 授权。
+
+完整产品与架构方向见
+[Alpha 产品与双客户端重构方向](docs/baseline/04-alpha-product-direction.md)和
+[ADR-0004](docs/decisions/ADR-0004-alpha-clients-and-agent-runtime.md)。Remote Core
+由 [Task015](docs/agent_context/tasks/task015/plan.md) 实现；Qt 6 Widgets GUI 与
+Ubuntu 兼容 AppImage 由 [Task016](docs/agent_context/tasks/task016/plan.md) 实现，
+界面规格见 [Qt GUI 设计](docs/design/remote-client-qt.md)。
 
 ## MVP-0 验收状态（2026-08-13）
 
@@ -54,6 +86,8 @@ Terminal WSS 与 Agent SSE；80/nginx、10002 以及全部既有容器保持不�
 6. [ADR-0001：MVP 技术决策](docs/decisions/ADR-0001-mvp-stack.md)
 7. [ADR-0002：OpenCode Agent Runtime](docs/decisions/ADR-0002-opencode-runtime.md)
 8. [ADR-0003：统一 Agent 调用与 Web 交互适配层](docs/decisions/ADR-0003-agent-adapter-ui.md)
+9. [Alpha 产品与双客户端重构方向](docs/baseline/04-alpha-product-direction.md)
+10. [ADR-0004：Alpha 双客户端与 Agent Runtime 架构](docs/decisions/ADR-0004-alpha-clients-and-agent-runtime.md)
 
 [《RemoteAgent 项目初步设计说明书》](RemoteAgent_项目初步设计说明书.md)保留为项目愿景和前期思考记录，不再作为 MVP 实现细节的唯一依据。
 
@@ -78,7 +112,8 @@ Terminal WSS 与 Agent SSE；80/nginx、10002 以及全部既有容器保持不�
 - **Controller**：浏览器中的 WebUI。
 - **RemoteAgent**：原始设计文档中的项目名；在新文档中泛指远程执行子系统。
 - **MVP-0**：三天内完成的功能闭环 Demo。
-- **Alpha**：在 MVP-0 之后进行安全、稳定性和可运维性加固的可试用版本。
+- **Alpha**：在 MVP-0 已验证底座上，重构两个客户端、Agent Runtime 兼容层、
+  交互与可运维性的可试用版本。
 
 ## 本地启动（Fake Agent）
 
@@ -104,6 +139,26 @@ Remote Client 默认拒绝 root，并默认只接受标准 TLS：
 ```bash
 ./aisummoner-client start --server https://aisummoner.example.com
 ```
+
+`start` 是保留的交互式兼容模式，配对码只写 stdout。常驻模式使用独立 Remote
+Core 和私有本地 IPC，不会把配对码写到 stdout/journal：
+
+```bash
+./aisummoner-client daemon \
+  --server https://aisummoner.example.com \
+  --data-dir "$HOME/.local/share/aisummoner"
+
+./aisummoner-client status --data-dir "$HOME/.local/share/aisummoner"
+./aisummoner-client pause --data-dir "$HOME/.local/share/aisummoner"
+./aisummoner-client resume --data-dir "$HOME/.local/share/aisummoner"
+./aisummoner-client refresh-pairing --data-dir "$HOME/.local/share/aisummoner"
+```
+
+这些控制命令只连接 data directory 内 mode `0600` 的 Unix socket；daemon 会在
+读取请求前核对 Linux `SO_PEERCRED`，只接受同 UID peer。`status` 是唯一会返回
+当前有效配对码的方法；`events.list` 及 daemon 日志不会包含配对码、Server URL、
+命令、终端/Agent 内容或 SSH 材料。该 socket 是本机 GUI/CLI API，不是远程 API。
+完整 v1 schema 见 [Remote Client Private IPC v1](docs/design/remote-client-ipc-v1.md)。
 
 只有 loopback 明文开发环境可以显式加 `--dev`。root 开发还必须同时显式加 `--allow-root-dev`，生产环境不要使用这两个开关。
 
@@ -169,36 +224,50 @@ docker compose --env-file .env -f deploy/compose.yaml up -d --build
 
 ### Linux x86_64 AppImage
 
-Remote Client 也可以封装为无 GUI 的 AppImage。它仍然是普通终端程序，
-`AppRun` 只把参数原样交给经过验证的 `aisummoner-client`，不会绕过非 root、
-TLS、Device Identity 或权限检查：
+桌面交付物 `AISummoner-Remote-0.1.0-x86_64.AppImage` 同时包含 Qt GUI 和静态
+Go daemon。必须由普通桌面用户运行；GUI 不读取 Device 私钥，也不会打开监听端口。
+首次使用：
 
 ```bash
-chmod +x AISummoner-Client-0.1.0-x86_64.AppImage
-SSL_CERT_FILE=/path/to/test-or-public-ca.crt \
-  ./AISummoner-Client-0.1.0-x86_64.AppImage start \
-  --server https://aisummoner.example.com \
-  --data-dir "$HOME/.local/share/aisummoner"
+chmod +x AISummoner-Remote-0.1.0-x86_64.AppImage
+./AISummoner-Remote-0.1.0-x86_64.AppImage
 ```
 
-若 Server 使用公共信任链，不需要设置 `SSL_CERT_FILE`。AppImage 不会注册
-后台服务；长期运行仍建议使用下方 systemd unit。仓库打包命令需要一个已经
-构建好的 Linux amd64 Client 和 `appimagetool`：
+在“设置”中填写精确的 Server HTTPS Origin（可含端口）和可选设备名，保存后点击
+“启动后台服务”。“状态”页会显示 Device ID、一次性配对码/倒计时、当前连接阶段、
+活跃控制会话总数和脱敏事件。刷新配对码会先明确提示它将关闭现有控制会话；暂停/
+恢复均通过同 UID、mode `0600` 的本机 Unix socket 完成。关闭或重开 GUI 不会停止
+daemon，数据固定保存在 `$HOME/.local/share/aisummoner`。
+
+公共信任链无需额外设置。仅在受控测试 CA 场景下，可在启动 GUI 时设置
+`SSL_CERT_FILE=/path/to/ca.crt`；它会由 GUI 原样继承给 daemon，不会写入设置文件。
+不要使用 `--dev`、`--allow-root-dev` 或跳过证书验证。
+
+AppImage 仍保留显式 CLI 兼容入口，参数不会经过 shell 求值：
 
 ```bash
-make client-appimage \
-  CLIENT_BINARY=dist/aisummoner-client \
-  APPIMAGETOOL=/path/to/appimagetool
+./AISummoner-Remote-0.1.0-x86_64.AppImage --cli status
+./AISummoner-Remote-0.1.0-x86_64.AppImage --cli pause
+./AISummoner-Remote-0.1.0-x86_64.AppImage --cli resume
+./AISummoner-Remote-0.1.0-x86_64.AppImage --cli refresh-pairing
 ```
 
-在离线或网络不稳定的构建机上，可额外传入已单独校验的官方 Type-2 runtime：
+仓库构建会在固定 Ubuntu 22.04/Qt 6.2 环境中编译并运行 QtTest，静态构建 Go
+daemon，收集 AppDir 依赖，检查最大 glibc 版本、文件权限及未解析动态库，再用固定
+SHA-256 的官方 AppImage 工具与 Type-2 runtime 封装：
 
 ```bash
-make client-appimage \
-  CLIENT_BINARY=dist/aisummoner-client \
-  APPIMAGETOOL=/path/to/appimagetool \
-  APPIMAGE_RUNTIME_FILE=/path/to/runtime-x86_64
+make remote-ui-test
+make remote-appimage
+
+# 网络受限时也可显式传入已校验的固定工具：
+./deploy/build-remote-client-appimage.sh dist/AISummoner-Remote-0.1.0-x86_64.AppImage \
+  /path/to/appimagetool /path/to/runtime-x86_64
 ```
+
+构建同时生成 `.sha256`。若目标 Ubuntu 没有可用 FUSE，可用
+`APPIMAGE_EXTRACT_AND_RUN=1 ./AISummoner-Remote-0.1.0-x86_64.AppImage` 运行同一内容。
+旧的 `make client-appimage` 仅保留为无 GUI CLI 回滚构建，不再是首选桌面交付物。
 
 创建普通系统用户 `aisummoner`，安装 Client 到 `/usr/local/bin`，在 `/etc/aisummoner/client.env` 仅写入：
 
@@ -206,9 +275,23 @@ make client-appimage \
 AISUMMONER_SERVER_URL=https://aisummoner.example.com
 ```
 
-然后复制 [deploy/aisummoner-client.service](deploy/aisummoner-client.service) 到 systemd unit 目录。Unit 使用 `/var/lib/aisummoner-client` 保存权限为 `0700/0600` 的长期 Device identity，并保持非 root 运行。Pairing code 不写入 journal，而是追加到同一私有目录下的 `pairing-output.log`；Unit 的 `UMask=0077` 应使该文件由 `aisummoner` 拥有且权限为 `0600`。
+然后复制 [deploy/aisummoner-client.service](deploy/aisummoner-client.service) 到
+systemd unit 目录。Unit 使用 daemon 模式和
+`/var/lib/aisummoner-client/client.sock`，长期 Device identity/data directory 为
+mode `0700`，socket 为 mode `0600`，进程保持非 root。stdout 直接丢弃，stderr
+只承载结构化非秘密日志；不再创建 `pairing-output.log`。
 
-启动或 unpair 后重新配对时，只读取最新 code；先用 `stat -c '%U:%G %a' /var/lib/aisummoner-client/pairing-output.log` 确认 owner/group 为服务账户且 mode 为 `600`，在 WebUI claim 成功后立即执行 `truncate -s 0 /var/lib/aisummoner-client/pairing-output.log`。服务运行时不要用删除文件替代 truncate：进程仍持有已删除 inode 时，后续 code 可能继续写入不可见的旧文件。只有停掉服务后才可删除该文件。实际安装、启停、权限动态验证和云主机变更留给受控部署任务执行。
+本机 status/pause/resume/refresh 操作必须以 `aisummoner` 服务用户运行，才能通过
+同 UID 检查。例如：
+
+```bash
+sudo -u aisummoner /usr/local/bin/aisummoner-client status \
+  --data-dir /var/lib/aisummoner-client
+```
+
+桌面 GUI 运行在桌面用户自己的 daemon 上，而不是借由权限提升访问另一用户的
+system service。systemd 形态与桌面形态应使用不同 Unix 用户/数据目录，不应尝试
+跨 UID 共享 socket。实际安装、启停和主机变更仍须在受控部署任务中执行。
 
 ## 常用验证命令
 

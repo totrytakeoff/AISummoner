@@ -11,12 +11,19 @@
 5. `docs/baseline/03-mvp-plan.md`
 6. `docs/decisions/ADR-0001-mvp-stack.md`
 7. `docs/decisions/ADR-0002-opencode-runtime.md`
+8. `docs/decisions/ADR-0003-agent-adapter-ui.md`
+9. `docs/baseline/04-alpha-product-direction.md`
+10. `docs/decisions/ADR-0004-alpha-clients-and-agent-runtime.md`
 
 `RemoteAgent_项目初步设计说明书.md` 是愿景和背景材料。发生冲突时，已接受 ADR 和 baseline 优先。
 
 ## 2. 当前任务边界
 
-当前目标是三天完成 `MVP-0`：Linux-only、单管理员、单节点、自托管、小规模设备、功能闭环 Demo。
+`MVP-0` 的 Linux-only、单管理员、单节点功能闭环已经由真实链路验证。
+当前进入 Alpha：保留既有安全/传输底座，按
+`docs/baseline/04-alpha-product-direction.md` 重构 Controller、Remote Client GUI
+和 Agent Runtime 兼容层。每次实现仍必须由当前 task plan 精确授权，不能把整个
+Alpha 路线图一次性展开。
 
 不得自行加入：
 
@@ -25,12 +32,14 @@
 - PostgreSQL、Redis、消息队列或微服务；
 - QUIC、P2P、Desktop；
 - SFTP、文件 UI、端口转发；
-- 绕过 ADR-0003 统一调用/展示适配层的第二个模型 Provider；
-- OpenCode 之外的 CLI Agent、通用 MCP 或 Skills Runtime；
+- 绕过 ADR-0003/ADR-0004 统一 Runtime/Capability/展示适配层的 Provider；
+- 未经独立 task plan 和 threat model 就启用 DSH/OpenCode/Codex/Claude 的
+  Server 本地 shell、文件系统、通用 MCP 或 Skills；
 - Terminal reconnect；
-- 与 12 项 MVP 验收无关的通用化重构。
+- 当前 task plan 之外的跨客户端通用化重构。
 
-发现有价值但不属于 MVP-0 的事项，记录到 backlog/issue，不在当前实现中顺手加入。
+文件、桌面、多用户等后续能力只有在对应 task/ADR 明确授权时才能实现，不在
+Controller 或 Adapter 重构中顺手加入。
 
 ## 3. 架构不变量
 
@@ -41,6 +50,11 @@
 - Remote Embedded SSHD 使用 Device Identity 作为 Host Key。
 - Server 必须严格验证 Device/SSH Host Key，禁止 `InsecureIgnoreHostKey`。
 - Agent Runtime 使用 loopback OpenCode sidecar；OpenCode 只能获得显式的远程工具，不能获得 Server 本地 shell。
+- DSH、OpenCode、Codex、Claude 等 Runtime 都只能通过 AISummoner Remote
+  Capability Bridge 操作当前 owned Device；Browser 和 Runtime 均不是第二个
+  Session/owner/approval 权威。
+- Remote GUI 与 Go daemon 通过私有本地 IPC 分离；Remote 仍不监听可远程控制
+  的 TCP 端口，GUI 不读取 Device 私钥。
 - 持久化使用 SQLite WAL；在线连接只存在单节点内存 Connection Manager。
 - 所有 Device、Terminal、Agent 操作都在 Server 端校验 owner。
 
@@ -66,11 +80,12 @@
 - ID 使用 `crypto/rand` 生成的不可预测带前缀 ID，不使用自增 ID 暴露资源规模。
 - API 错误遵循 baseline 的统一 envelope，并携带 request ID。
 - 新增依赖前说明必要性；优先标准库和已冻结技术栈。
-- 前端以功能与清晰状态为先，不花时间做动画和主题系统。
+- 前端以信息架构、状态清晰、可访问性和稳定布局为先；主题/动画必须服务交互，
+  不得挤占当前 task 的核心状态与数据面验证。
 
 ## 6. 验证要求
 
-每次实现应运行与变更最相关的最小测试；合入 MVP checkpoint 前运行：
+每次实现应运行与变更最相关的最小测试；合入 Alpha task checkpoint 前运行：
 
 ```bash
 go test ./...
@@ -81,11 +96,11 @@ npm --prefix web run build
 
 涉及完整链路时，再运行 Playwright E2E 和 Docker Compose 配置检查。不能运行的测试必须在交付说明中明确写出原因，不能暗示已经通过。
 
-必须覆盖失败路径：未认证、非 owner、Device Offline、超时、断线、输入过大、审批拒绝和 secret 脱敏。
+必须覆盖失败路径：未认证、非 owner、Device Offline、超时、断线、输入过大、审批拒绝和 secret 脱敏。涉及工作区时还必须覆盖 Device/Session 快速切换、旧异步结果晚到、面板关闭与重挂载。
 
 ## 7. 文档同步
 
-- 协议、数据表、配置项或验收条件改变时，在同一个变更中更新 baseline。
+- 协议、数据表、配置项或验收条件改变时，在同一个变更中更新当前 Alpha baseline；MVP 验收文档作为历史记录只追加勘误，不改写既有证据。
 - 核心技术选择或信任边界改变时新增 ADR。
 - 不为普通重命名或内部重构创建 ADR。
 - 代码实现与文档不一致时，不默认代码正确；先根据权威顺序判断并消除差异。

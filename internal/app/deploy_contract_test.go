@@ -124,13 +124,16 @@ func TestDeploymentContractSources(t *testing.T) {
 	clientUnit := read("deploy/aisummoner-client.service")
 	for _, required := range []string{
 		"StateDirectory=aisummoner-client", "StateDirectoryMode=0700", "UMask=0077",
-		"StandardOutput=append:/var/lib/aisummoner-client/pairing-output.log", "StandardError=journal",
+		"StandardOutput=null", "StandardError=journal",
+		"aisummoner-client daemon --server ${AISUMMONER_SERVER_URL} --data-dir /var/lib/aisummoner-client",
 	} {
 		if !strings.Contains(clientUnit, required) {
-			t.Fatalf("Remote Client unit lacks private pairing-output contract %q", required)
+			t.Fatalf("Remote Client unit lacks daemon/private-IPC contract %q", required)
 		}
 	}
-	if strings.Contains(clientUnit, "StandardOutput=journal") {
-		t.Fatal("Remote Client unit must never persist pairing codes in the journal")
+	for _, forbidden := range []string{"pairing-output.log", "aisummoner-client start ", "StandardOutput=journal"} {
+		if strings.Contains(clientUnit, forbidden) {
+			t.Fatalf("Remote Client unit retains obsolete pairing-output contract %q", forbidden)
+		}
 	}
 }

@@ -2,12 +2,12 @@
   "workflow_id": "AISummoner-2026-08-12-001",
   "project": "AISummoner",
   "context_dir": "docs/agent_context",
-  "current_task": "task014",
+  "current_task": "task016",
   "current_stage": "review",
   "status": "awaiting_review",
-  "iteration": 2,
-  "last_decision": "TASK014_REVISION_2_READY_FOR_REVIEW",
+  "iteration": 0,
+  "last_decision": "TASK016_READY_FOR_REVIEW",
   "next_agent": "reviewer",
   "max_revisions_per_task": 3,
-  "updated_at": "2026-08-23T00:42:01+08:00"
+  "updated_at": "2026-08-23T19:04:00+08:00"
 }
