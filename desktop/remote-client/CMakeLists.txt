@@ -9,6 +9,13 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
+set(AISUMMONER_DEFAULT_SERVER_ORIGIN "https://122.51.70.33:10001" CACHE STRING
+    "Default AISummoner HTTPS origin embedded in the branded Remote Client")
+if(NOT AISUMMONER_DEFAULT_SERVER_ORIGIN MATCHES
+   "^https://([A-Za-z0-9.-]+|\\[[0-9A-Fa-f:]+\\])(:[0-9]+)?$")
+    message(FATAL_ERROR "AISUMMONER_DEFAULT_SERVER_ORIGIN must be an HTTPS origin")
+endif()
+
 find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets Network)
 
 add_library(aisummoner_remote_ui STATIC
@@ -30,6 +37,7 @@ target_link_libraries(aisummoner_remote_ui PUBLIC
 )
 target_compile_definitions(aisummoner_remote_ui PUBLIC
     AISUMMONER_GUI_VERSION="${PROJECT_VERSION}"
+    AISUMMONER_DEFAULT_SERVER_ORIGIN="${AISUMMONER_DEFAULT_SERVER_ORIGIN}"
 )
 target_compile_options(aisummoner_remote_ui PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>

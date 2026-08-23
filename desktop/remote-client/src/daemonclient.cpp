@@ -239,8 +239,9 @@ void DaemonClient::requestAction(const QString &method)
 
 void DaemonClient::setAvailable(bool available)
 {
-    if (available_ == available) return;
+    if (availabilityAnnounced_ && available_ == available) return;
     available_ = available;
+    availabilityAnnounced_ = true;
     emit availabilityChanged(available_);
 }
 

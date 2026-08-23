@@ -4,7 +4,7 @@ type: plan
 status: ready_for_implementation
 from: planner
 to: coder
-revision: 0
+revision: 1
 requires_review: true
 ---
 
@@ -144,3 +144,12 @@ to the sibling daemon, obtain/copy/refresh a pairing code, observe connection
 and sanitized activity, pause/resume joined control, close/reopen the GUI
 without dropping the daemon, and run the resulting AppImage on the target
 Ubuntu class with no secret artifact.
+
+## Revision 1: Zero-Configuration Branded Start
+
+Direct user feedback rejected exposing the Server Origin as a mandatory
+first-run field. The branded AppImage must compile in a validated default HTTPS
+origin, automatically start its sibling daemon when no local daemon is present,
+and take the user straight to status/pairing. The origin remains build-time
+overridable for self-host distributions, while an explicit advanced panel may
+override it locally. Normal startup must not require visiting Settings.

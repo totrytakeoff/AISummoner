@@ -5,9 +5,9 @@
   "current_task": "task016",
   "current_stage": "review",
   "status": "awaiting_review",
-  "iteration": 0,
-  "last_decision": "TASK016_READY_FOR_REVIEW",
+  "iteration": 1,
+  "last_decision": "TASK016_REVISION1_READY_FOR_REVIEW",
   "next_agent": "reviewer",
   "max_revisions_per_task": 3,
-  "updated_at": "2026-08-23T19:04:00+08:00"
+  "updated_at": "2026-08-23T19:42:00+08:00"
 }

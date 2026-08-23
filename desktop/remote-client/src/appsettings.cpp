@@ -17,7 +17,9 @@ AppSettings::AppSettings(const QString &fileName)
 UserPreferences AppSettings::load() const
 {
     UserPreferences preferences;
-    preferences.serverOrigin = settings_->value(QStringLiteral("connection/serverOrigin")).toString();
+    preferences.serverOrigin = settings_->value(QStringLiteral("connection/serverOrigin"),
+                                                 defaultServerOrigin()).toString().trimmed();
+    if (preferences.serverOrigin.isEmpty()) preferences.serverOrigin = defaultServerOrigin();
     preferences.deviceName = settings_->value(QStringLiteral("device/displayName")).toString();
     preferences.theme = themeFromKey(settings_->value(QStringLiteral("appearance/theme"),
                                                        QStringLiteral("system")).toString());
@@ -48,6 +50,11 @@ QString AppSettings::defaultDataDirectory()
 QString AppSettings::defaultSocketPath()
 {
     return QDir(defaultDataDirectory()).filePath(QStringLiteral("client.sock"));
+}
+
+QString AppSettings::defaultServerOrigin()
+{
+    return QStringLiteral(AISUMMONER_DEFAULT_SERVER_ORIGIN);
 }
 
 QString themeKey(ThemePreference theme)

@@ -105,11 +105,14 @@ signals:
 private:
     QLineEdit *serverOrigin_ = nullptr;
     QLineEdit *deviceName_ = nullptr;
+    QWidget *advancedServerPanel_ = nullptr;
     QComboBox *theme_ = nullptr;
     QLabel *message_ = nullptr;
     QLabel *daemonState_ = nullptr;
     QPushButton *saveButton_ = nullptr;
     QPushButton *startButton_ = nullptr;
+    QPushButton *advancedServerButton_ = nullptr;
+    QPushButton *restoreDefaultButton_ = nullptr;
     bool daemonAvailable_ = false;
 };
 
@@ -142,6 +145,7 @@ private:
     SettingsPage *settingsPage_ = nullptr;
     QStackedWidget *pages_ = nullptr;
     QVector<QPushButton *> navigationButtons_;
+    bool autoStartAttempted_ = false;
 };
 
 } // namespace aisummoner

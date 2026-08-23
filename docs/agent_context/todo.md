@@ -17,8 +17,9 @@ updated_by: planner
 - [x] task015 Remote Core daemon/private IPC implemented, fully verified and
   frozen for the Qt consumer; final combined review remains due because the
   external delta re-review timed out without a verdict.
-- [x] task016 Qt 6 Widgets GUI and GUI+daemon AppImage implemented, verified
-  and frozen as `ready_for_review`.
+- [x] task016 revision 1 removes mandatory first-run Server entry, embeds a
+  build-time default, automatically starts the daemon, keeps self-hosting under
+  an advanced override, and has been rebuilt/reverified as `ready_for_review`.
 
 ## Next
 

@@ -15,6 +15,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLabel>
+#include <QLineEdit>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QPushButton>
@@ -416,6 +417,8 @@ void RemoteClientUiTest::settingsPersistOnlyAllowlistedValues()
     QVERIFY(temporary.isValid());
     const QString file = temporary.filePath(QStringLiteral("settings.ini"));
     AppSettings settings(file);
+    QVERIFY(AppSettings::defaultServerOrigin().startsWith(QStringLiteral("https://")));
+    QCOMPARE(settings.load().serverOrigin, AppSettings::defaultServerOrigin());
     UserPreferences preferences{QStringLiteral("https://control.example"),
                                 QStringLiteral("desktop"), ThemePreference::Dark};
     settings.save(preferences);
@@ -455,6 +458,10 @@ void RemoteClientUiTest::widgetsExposeAllStatesAndPairingSafety()
         QVERIFY(pill);
         QVERIFY(pill->text().contains(phase == DaemonPhase::Online
             ? QStringLiteral("在线") : phaseLabel(phase)));
+        const auto *service = page.findChild<QLabel *>(QStringLiteral("ServerOriginLabel"));
+        QVERIFY(service);
+        QCOMPARE(service->text(), QStringLiteral("服务：AISummoner"));
+        QVERIFY(!service->text().contains(QStringLiteral("control.example")));
     }
     RemoteStatus paired;
     paired.deviceId = QStringLiteral("dev_test");
@@ -499,11 +506,17 @@ void RemoteClientUiTest::mainWindowHasThreePagesAndCloseDoesNotPause()
     executable.close();
     executable.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
     AppSettings settings(temporary.filePath(QStringLiteral("settings.ini")));
-    settings.save({QStringLiteral("https://control.example"), QStringLiteral("device"),
-                   ThemePreference::System});
     DaemonClient client(temporary.filePath(QStringLiteral("missing.sock")), nullptr, 100, 1000);
+    int daemonStarts = 0;
+    QStringList daemonArguments;
     DaemonLauncher launcher(temporary.path(), temporary.filePath(QStringLiteral("data")), nullptr,
-        [](const QString &, const QStringList &, const QString &, qint64 *pid) { *pid = 1; return true; });
+        [&daemonStarts, &daemonArguments](const QString &, const QStringList &arguments,
+                                         const QString &, qint64 *pid) {
+            ++daemonStarts;
+            daemonArguments = arguments;
+            *pid = 1;
+            return true;
+        });
     QSignalSpy requestSpy(&client, &DaemonClient::requestSent);
     MainWindow window(&settings, &client, &launcher);
     window.show();
@@ -511,6 +524,28 @@ void RemoteClientUiTest::mainWindowHasThreePagesAndCloseDoesNotPause()
     auto *stack = window.findChild<QStackedWidget *>(QStringLiteral("PageStack"));
     QVERIFY(stack);
     QCOMPARE(stack->count(), 3);
+    QTRY_COMPARE_WITH_TIMEOUT(daemonStarts, 1, 1000);
+    const qsizetype serverIndex = daemonArguments.indexOf(QStringLiteral("--server"));
+    QVERIFY(serverIndex >= 0 && serverIndex + 1 < daemonArguments.size());
+    QCOMPARE(daemonArguments.at(serverIndex + 1), AppSettings::defaultServerOrigin());
+    auto *advanced = window.findChild<QWidget *>(QStringLiteral("AdvancedServerPanel"));
+    auto *advancedButton = window.findChild<QPushButton *>(QStringLiteral("AdvancedServerButton"));
+    auto *serverInput = window.findChild<QLineEdit *>(QStringLiteral("ServerOriginInput"));
+    auto *restoreDefault = window.findChild<QPushButton *>(QStringLiteral("RestoreDefaultServerButton"));
+    QVERIFY(advanced);
+    QVERIFY(advancedButton);
+    QVERIFY(serverInput);
+    QVERIFY(restoreDefault);
+    QVERIFY(advanced->isHidden());
+    QTest::mouseClick(advancedButton, Qt::LeftButton);
+    QVERIFY(!advanced->isHidden());
+    serverInput->setText(QStringLiteral("https://self-host.example"));
+    QCOMPARE(window.settingsPage()->preferences().serverOrigin,
+             QStringLiteral("https://self-host.example"));
+    QTest::mouseClick(restoreDefault, Qt::LeftButton);
+    QCOMPARE(window.settingsPage()->preferences().serverOrigin,
+             AppSettings::defaultServerOrigin());
+    QVERIFY(advanced->isHidden());
     QTest::mouseClick(window.findChild<QPushButton *>(QStringLiteral("Navigation1")), Qt::LeftButton);
     QCOMPARE(stack->currentIndex(), 1);
     window.close();

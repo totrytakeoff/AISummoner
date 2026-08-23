@@ -25,6 +25,7 @@ public:
 
     static QString defaultDataDirectory();
     static QString defaultSocketPath();
+    static QString defaultServerOrigin();
 
 private:
     std::unique_ptr<QSettings> settings_;

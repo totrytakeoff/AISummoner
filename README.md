@@ -233,11 +233,16 @@ chmod +x AISummoner-Remote-0.1.0-x86_64.AppImage
 ./AISummoner-Remote-0.1.0-x86_64.AppImage
 ```
 
-在“设置”中填写精确的 Server HTTPS Origin（可含端口）和可选设备名，保存后点击
-“启动后台服务”。“状态”页会显示 Device ID、一次性配对码/倒计时、当前连接阶段、
+正式发行包已预置 AISummoner HTTPS 服务。首次打开会自动启动后台服务，无需填写
+Server 地址；直接在“状态”页等待一次性配对码即可。“状态”页还会显示 Device ID、
+配对码倒计时、当前连接阶段、
 活跃控制会话总数和脱敏事件。刷新配对码会先明确提示它将关闭现有控制会话；暂停/
 恢复均通过同 UID、mode `0600` 的本机 Unix socket 完成。关闭或重开 GUI 不会停止
 daemon，数据固定保存在 `$HOME/.local/share/aisummoner`。
+
+“设置 → 高级：自托管服务”只供自托管部署者覆盖服务 Origin，普通用户无需展开。
+构建发行包时可用 `AISUMMONER_DEFAULT_SERVER_ORIGIN=https://example.com` 覆盖默认值；
+它必须是无路径、无凭据、无 query/fragment 的 HTTPS Origin。
 
 公共信任链无需额外设置。仅在受控测试 CA 场景下，可在启动 GUI 时设置
 `SSL_CERT_FILE=/path/to/ca.crt`；它会由 GUI 原样继承给 daemon，不会写入设置文件。
@@ -259,6 +264,9 @@ SHA-256 的官方 AppImage 工具与 Type-2 runtime 封装：
 ```bash
 make remote-ui-test
 make remote-appimage
+
+# 自托管发行包：在构建期写入自己的 HTTPS Origin
+AISUMMONER_DEFAULT_SERVER_ORIGIN=https://control.example.com make remote-appimage
 
 # 网络受限时也可显式传入已校验的固定工具：
 ./deploy/build-remote-client-appimage.sh dist/AISummoner-Remote-0.1.0-x86_64.AppImage \

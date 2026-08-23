@@ -234,7 +234,7 @@ void StatusPage::setAvailable(bool available)
     available_ = available;
     if (!available_) {
         statusPill_->setText(QStringLiteral("○ 后台服务不可用"));
-        statusDetail_->setText(QStringLiteral("设置 Server 地址后启动本机后台服务。"));
+        statusDetail_->setText(QStringLiteral("正在连接本机后台服务；首次运行会自动完成启动。"));
         sessionCount_->setText(QStringLiteral("—"));
         connectionValue_->setText(QStringLiteral("不可用"));
         pairingCard_->hide();
@@ -267,7 +267,7 @@ void StatusPage::setStatus(const RemoteStatus &status)
                 : QStringLiteral("后台服务状态：%1").arg(label));
     deviceName_->setText(status.deviceName);
     deviceId_->setText(status.deviceId);
-    serverOrigin_->setText(QStringLiteral("Server：%1").arg(status.serverOrigin));
+    serverOrigin_->setText(QStringLiteral("服务：AISummoner"));
     deviceCopyButton_->setEnabled(!status.deviceId.isEmpty());
     sessionCount_->setText(QString::number(status.activeSessions));
     connectionValue_->setText(phaseLabel(status.phase));
@@ -404,19 +404,37 @@ SettingsPage::SettingsPage(QWidget *parent) : QWidget(parent)
     auto *connectionCard = card();
     auto *connection = new QVBoxLayout(connectionCard);
     connection->setContentsMargins(20, 18, 20, 18);
-    auto *connectionTitle = new QLabel(QStringLiteral("连接设置"));
+    auto *connectionTitle = new QLabel(QStringLiteral("AISummoner 服务"));
     connectionTitle->setObjectName(QStringLiteral("SectionTitle"));
+    auto *serviceDescription = secondaryLabel(
+        QStringLiteral("默认服务已经配置，正常使用无需填写地址。打开应用即可获取配对码。"));
+    advancedServerButton_ = new QPushButton(QStringLiteral("高级：自托管服务"));
+    advancedServerButton_->setObjectName(QStringLiteral("AdvancedServerButton"));
+    advancedServerButton_->setCheckable(true);
+    advancedServerButton_->setAccessibleName(QStringLiteral("展开自托管服务设置"));
+    advancedServerPanel_ = new QWidget;
+    advancedServerPanel_->setObjectName(QStringLiteral("AdvancedServerPanel"));
+    auto *advanced = new QVBoxLayout(advancedServerPanel_);
+    advanced->setContentsMargins(0, 8, 0, 0);
     serverOrigin_ = new QLineEdit;
     serverOrigin_->setObjectName(QStringLiteral("ServerOriginInput"));
-    serverOrigin_->setAccessibleName(QStringLiteral("AISummoner Server HTTPS 地址"));
-    serverOrigin_->setPlaceholderText(QStringLiteral("https://control.example.com"));
+    serverOrigin_->setAccessibleName(QStringLiteral("自托管 AISummoner Server HTTPS 地址"));
+    serverOrigin_->setPlaceholderText(AppSettings::defaultServerOrigin());
+    restoreDefaultButton_ = new QPushButton(QStringLiteral("恢复默认服务"));
+    restoreDefaultButton_->setObjectName(QStringLiteral("RestoreDefaultServerButton"));
+    restoreDefaultButton_->setAccessibleName(QStringLiteral("恢复默认 AISummoner 服务"));
+    advanced->addWidget(secondaryLabel(QStringLiteral("自托管 Server HTTPS Origin")));
+    advanced->addWidget(serverOrigin_);
+    advanced->addWidget(restoreDefaultButton_, 0, Qt::AlignLeft);
+    advancedServerPanel_->hide();
     deviceName_ = new QLineEdit;
     deviceName_->setObjectName(QStringLiteral("DeviceNameInput"));
     deviceName_->setAccessibleName(QStringLiteral("设备显示名称"));
     deviceName_->setMaxLength(128);
     connection->addWidget(connectionTitle);
-    connection->addWidget(secondaryLabel(QStringLiteral("Server HTTPS Origin")));
-    connection->addWidget(serverOrigin_);
+    connection->addWidget(serviceDescription);
+    connection->addWidget(advancedServerButton_, 0, Qt::AlignLeft);
+    connection->addWidget(advancedServerPanel_);
     connection->addWidget(secondaryLabel(QStringLiteral("设备显示名称（留空时使用主机名）")));
     connection->addWidget(deviceName_);
     connection->addWidget(secondaryLabel(QStringLiteral("修改会在下一次后台服务启动时生效，不会热修改正在运行的连接。")));
@@ -478,6 +496,17 @@ SettingsPage::SettingsPage(QWidget *parent) : QWidget(parent)
     outer->addWidget(scrollablePage(contents, this));
     connect(saveButton_, &QPushButton::clicked, this, [this]() { emit saveRequested(preferences()); });
     connect(startButton_, &QPushButton::clicked, this, &SettingsPage::startRequested);
+    connect(advancedServerButton_, &QPushButton::toggled, this, [this](bool expanded) {
+        advancedServerPanel_->setVisible(expanded);
+        advancedServerButton_->setText(expanded ? QStringLiteral("收起自托管设置")
+                                                : QStringLiteral("高级：自托管服务"));
+        advancedServerButton_->setAccessibleName(expanded ? QStringLiteral("收起自托管服务设置")
+                                                          : QStringLiteral("展开自托管服务设置"));
+    });
+    connect(restoreDefaultButton_, &QPushButton::clicked, this, [this]() {
+        serverOrigin_->setText(AppSettings::defaultServerOrigin());
+        advancedServerButton_->setChecked(false);
+    });
 }
 
 void SettingsPage::setPreferences(const UserPreferences &preferences)
@@ -486,12 +515,14 @@ void SettingsPage::setPreferences(const UserPreferences &preferences)
     deviceName_->setText(preferences.deviceName);
     theme_->setCurrentIndex(preferences.theme == ThemePreference::Light ? 1
                             : preferences.theme == ThemePreference::Dark ? 2 : 0);
+    advancedServerButton_->setChecked(preferences.serverOrigin != AppSettings::defaultServerOrigin());
 }
 
 UserPreferences SettingsPage::preferences() const
 {
     UserPreferences value;
-    value.serverOrigin = serverOrigin_->text();
+    value.serverOrigin = serverOrigin_->text().trimmed();
+    if (value.serverOrigin.isEmpty()) value.serverOrigin = AppSettings::defaultServerOrigin();
     value.deviceName = deviceName_->text();
     value.theme = theme_->currentIndex() == 1 ? ThemePreference::Light
                   : theme_->currentIndex() == 2 ? ThemePreference::Dark : ThemePreference::System;
@@ -585,6 +616,12 @@ MainWindow::MainWindow(AppSettings *settings, DaemonClient *client, DaemonLaunch
         statusPage_->setAvailable(available);
         settingsPage_->setDaemonAvailable(available);
         launcher_->setDaemonAvailable(available);
+        if (!available && !autoStartAttempted_) {
+            autoStartAttempted_ = true;
+            QTimer::singleShot(0, this, [this]() {
+                if (!client_->isAvailable()) requestDaemonStart();
+            });
+        }
     });
     connect(client_, &DaemonClient::statusChanged, statusPage_, &StatusPage::setStatus);
     connect(client_, &DaemonClient::eventsReceived, this, [this](const QVector<RemoteEvent> &events) {

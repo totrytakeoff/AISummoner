@@ -17,6 +17,16 @@ output_dir=$(dirname -- "$output")
 mkdir -p "$output_dir"
 output_dir=$(CDPATH= cd -- "$output_dir" && pwd)
 output=$output_dir/$(basename -- "$output")
+default_server_origin=${AISUMMONER_DEFAULT_SERVER_ORIGIN:-https://122.51.70.33:10001}
+
+case "$default_server_origin" in
+  https://*/*|*\?*|*\#*|*@*)
+    echo "default server must be an HTTPS origin without credentials, path, query or fragment" >&2
+    exit 1
+    ;;
+  https://*) ;;
+  *) echo "default server must be an HTTPS origin" >&2; exit 1 ;;
+esac
 
 command -v docker >/dev/null 2>&1 || {
   echo "docker is required" >&2
@@ -30,6 +40,7 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 docker build --file "$script_dir/RemoteClient.Dockerfile" \
+  --build-arg "AISUMMONER_DEFAULT_SERVER_ORIGIN=$default_server_origin" \
   --target remote-client-appdir \
   --output "type=local,dest=$work_dir/AppDir" \
   "$repository"
@@ -91,5 +102,5 @@ fi
 ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "$appimagetool" --no-appstream \
   --runtime-file "$runtime" "$work_dir/AppDir" "$output"
 chmod 0755 "$output"
-sha256sum "$output" > "$output.sha256"
+(CDPATH= cd -- "$output_dir" && sha256sum "$(basename -- "$output")") > "$output.sha256"
 printf 'Built %s\n' "$output"

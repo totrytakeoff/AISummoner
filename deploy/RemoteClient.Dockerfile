@@ -4,6 +4,7 @@
 # closure is bundled into the AppDir. The Go daemon is a separate static build.
 ARG GO_IMAGE=golang@sha256:ab1d1823abb55a9504d2e3e003b75b36dbeb1cbcc4c92593d85a84ee46becc6c
 ARG QT_BUILD_IMAGE=ubuntu@sha256:c7eb020043d8fc2ae0793fb35a37bff1cf33f156d4d4b12ccc7f3ef8706c38b1
+ARG AISUMMONER_DEFAULT_SERVER_ORIGIN=https://122.51.70.33:10001
 
 FROM ${GO_IMAGE} AS go-build
 WORKDIR /src
@@ -22,10 +23,12 @@ RUN apt-get update \
        build-essential cmake ninja-build patchelf file binutils libgl-dev \
        qt6-base-dev qt6-base-dev-tools \
     && rm -rf /var/lib/apt/lists/*
+ARG AISUMMONER_DEFAULT_SERVER_ORIGIN
 WORKDIR /src
 COPY desktop/remote-client ./desktop/remote-client
 RUN cmake -S desktop/remote-client -B /build/remote-client -G Ninja \
       -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
+      -DAISUMMONER_DEFAULT_SERVER_ORIGIN="${AISUMMONER_DEFAULT_SERVER_ORIGIN}" \
     && cmake --build /build/remote-client --parallel 2 \
     && QT_QPA_PLATFORM=offscreen ctest --test-dir /build/remote-client --output-on-failure \
     && cmake --install /build/remote-client --prefix /out/AISummoner-Remote.AppDir/usr

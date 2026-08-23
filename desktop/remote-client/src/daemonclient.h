@@ -52,6 +52,7 @@ private:
     int requestTimeoutMs_;
     bool running_ = false;
     bool available_ = false;
+    bool availabilityAnnounced_ = false;
     bool statusPending_ = false;
     bool eventsPending_ = false;
     bool actionPending_ = false;
