@@ -86,10 +86,10 @@ describe('Agent event stream lifecycle', () => {
 
     act(() => first.fail())
     expect(screen.getByTestId('stream-state')).toHaveTextContent('error')
-    expect(screen.getByText(/event stream disconnected/)).toBeInTheDocument()
+    expect(screen.getByText(/事件流已断开/)).toBeInTheDocument()
     act(() => first.open())
     expect(screen.getByTestId('stream-state')).toHaveTextContent('open')
-    expect(screen.queryByText(/event stream disconnected/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/事件流已断开/)).not.toBeInTheDocument()
 
     view.rerender(<Harness sessionID="ags_b" />)
     const second = FakeEventSource.instances[1]

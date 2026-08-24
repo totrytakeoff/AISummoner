@@ -3,6 +3,7 @@ package agentapi
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -49,6 +50,24 @@ func (probe *providerConfiguratorProbe) ConfigureDeepSeek(_ context.Context, key
 	return probe.err
 }
 
+func (probe *providerConfiguratorProbe) ConfigureDSH(_ context.Context, key string) error {
+	probe.mu.Lock()
+	defer probe.mu.Unlock()
+	probe.calls++
+	probe.key = key
+	probe.model = ""
+	return probe.err
+}
+
+func (probe *providerConfiguratorProbe) DescribeDSH(context.Context) (DSHCredentialStatus, error) {
+	probe.mu.Lock()
+	defer probe.mu.Unlock()
+	if probe.err != nil {
+		return DSHCredentialStatus{}, probe.err
+	}
+	return DSHCredentialStatus{Configured: probe.key != "", Writable: true}, nil
+}
+
 func (probe *providerConfiguratorProbe) snapshot() (int, string, string) {
 	probe.mu.Lock()
 	defer probe.mu.Unlock()
@@ -64,12 +83,14 @@ type apiFixture struct {
 	ownerID string
 	device  string
 	now     time.Time
+	dbPath  string
 }
 
 func newAPIFixture(t *testing.T) *apiFixture {
 	t.Helper()
 	ctx := context.Background()
-	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "agent-api.db"))
+	databasePath := filepath.Join(t.TempDir(), "agent-api.db")
+	database, err := store.Open(ctx, databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,9 +118,17 @@ func newAPIFixture(t *testing.T) *apiFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	serviceNow := now
+	var serviceClock sync.Mutex
 	service, err := agent.NewService(agent.ServiceOptions{
 		Store: database, Adapter: &agent.FakeAdapter{}, Executor: apiExecutor{}, Online: apiOnline{},
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), TurnTimeout: time.Second, ApprovalTimeout: time.Second,
+		Now: func() time.Time {
+			serviceClock.Lock()
+			defer serviceClock.Unlock()
+			serviceNow = serviceNow.Add(time.Nanosecond)
+			return serviceNow
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -115,6 +144,7 @@ func newAPIFixture(t *testing.T) *apiFixture {
 	return &apiFixture{
 		t: t, store: database, service: service, handler: api.Handler(),
 		cookie: &http.Cookie{Name: sessionCookieName, Value: login.Token}, ownerID: ownerID, device: deviceID, now: now,
+		dbPath: databasePath,
 	}
 }
 
@@ -232,6 +262,135 @@ func TestDeepSeekConfigurationDoesNotEchoOrLogCredentials(t *testing.T) {
 	}
 }
 
+func TestDSHConfigurationRequiresAuthOriginBoundsAndNeverLeaksCredential(t *testing.T) {
+	fixture := newAPIFixture(t)
+	secret := "sk-dsh-private-credential-sentinel"
+	probe := &providerConfiguratorProbe{}
+	var logs bytes.Buffer
+	api, err := New(Options{
+		Auth: auth.NewService(fixture.store), Agent: fixture.service, DSHConfigurator: probe,
+		AllowedOrigin: apiTestOrigin, Logger: slog.New(slog.NewTextHandler(&logs, nil)),
+		Now: func() time.Time { return fixture.now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := api.Handler()
+	describe := func(cookie *http.Cookie) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/agent-provider/dsh", nil)
+		if cookie != nil {
+			req.AddCookie(cookie)
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, req)
+		return response
+	}
+	request := func(cookie *http.Cookie, origins []string, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/agent-provider/dsh", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		for _, origin := range origins {
+			req.Header.Add("Origin", origin)
+		}
+		if cookie != nil {
+			req.AddCookie(cookie)
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, req)
+		return response
+	}
+
+	assertError(t, describe(nil), http.StatusUnauthorized, "UNAUTHENTICATED")
+	status := describe(fixture.cookie)
+	if status.Code != http.StatusOK || strings.TrimSpace(status.Body.String()) != `{"credential":{"configured":false,"writable":true}}` ||
+		status.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("missing DSH status=%d cache=%q body=%s", status.Code, status.Header().Get("Cache-Control"), status.Body.String())
+	}
+	assertError(t, request(nil, []string{apiTestOrigin}, `{}`), http.StatusUnauthorized, "UNAUTHENTICATED")
+	assertError(t, request(fixture.cookie, nil, `{}`), http.StatusForbidden, "ORIGIN_FORBIDDEN")
+	assertError(t, request(fixture.cookie, []string{apiTestOrigin, apiTestOrigin}, `{}`), http.StatusForbidden, "ORIGIN_FORBIDDEN")
+	assertError(t, request(fixture.cookie, []string{apiTestOrigin}, `{"api_key":"key","extra":true}`), http.StatusBadRequest, "INVALID_REQUEST")
+	assertError(t, request(fixture.cookie, []string{apiTestOrigin}, strings.Repeat("x", maxDSHConfigJSONBodyBytes+1)), http.StatusBadRequest, "INVALID_REQUEST")
+	if calls, _, _ := probe.snapshot(); calls != 0 {
+		t.Fatalf("invalid DSH requests reached configurator %d times", calls)
+	}
+
+	body, _ := json.Marshal(map[string]string{"api_key": secret})
+	response := request(fixture.cookie, []string{apiTestOrigin}, string(body))
+	if response.Code != http.StatusNoContent || response.Body.Len() != 0 || response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("DSH configuration response=%d cache=%q body=%q", response.Code, response.Header().Get("Cache-Control"), response.Body.String())
+	}
+	if calls, key, model := probe.snapshot(); calls != 1 || key != secret || model != "" {
+		t.Fatalf("DSH configurator calls=%d key-match=%v model=%q", calls, key == secret, model)
+	}
+	if strings.Contains(response.Body.String(), secret) || strings.Contains(logs.String(), secret) {
+		t.Fatal("DSH credential leaked through response or logs")
+	}
+	status = describe(fixture.cookie)
+	if status.Code != http.StatusOK || strings.TrimSpace(status.Body.String()) != `{"credential":{"configured":true,"writable":true}}` ||
+		strings.Contains(status.Body.String(), secret) || strings.Contains(status.Body.String(), "source") {
+		t.Fatalf("configured DSH status exposed private detail: status=%d body=%s", status.Code, status.Body.String())
+	}
+
+	probe.err = &agent.AdapterError{Code: "provider_unavailable", Err: errors.New("host failed " + secret)}
+	response = request(fixture.cookie, []string{apiTestOrigin}, string(body))
+	assertError(t, response, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE")
+	if strings.Contains(response.Body.String(), secret) || strings.Contains(logs.String(), secret) {
+		t.Fatal("DSH credential/configuration error leaked through response or logs")
+	}
+
+	missing := fixture.request(http.MethodPost, "/api/v1/agent-provider/dsh", `{}`, fixture.cookie, true)
+	assertError(t, missing, http.StatusNotFound, "NOT_FOUND")
+}
+
+func TestAPISessionPermissionDefaultsArchiveRestoreAndDelete(t *testing.T) {
+	fixture := newAPIFixture(t)
+	settings := fixture.request(http.MethodGet, "/api/v1/agent-settings", "", fixture.cookie, false)
+	if settings.Code != http.StatusOK || !strings.Contains(settings.Body.String(), `"default_approval_mode":"per_command"`) {
+		t.Fatalf("default settings status=%d body=%s", settings.Code, settings.Body.String())
+	}
+	updatedSettings := fixture.request(http.MethodPatch, "/api/v1/agent-settings", `{"default_approval_mode":"full_access"}`, fixture.cookie, true)
+	if updatedSettings.Code != http.StatusOK || !strings.Contains(updatedSettings.Body.String(), `"default_approval_mode":"full_access"`) {
+		t.Fatalf("updated settings status=%d body=%s", updatedSettings.Code, updatedSettings.Body.String())
+	}
+	created := fixture.request(http.MethodPost, "/api/v1/devices/"+fixture.device+"/agent-sessions", `{}`, fixture.cookie, true)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("default Session status=%d body=%s", created.Code, created.Body.String())
+	}
+	var createdPayload struct {
+		Session sessionJSON `json:"session"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &createdPayload); err != nil {
+		t.Fatal(err)
+	}
+	if createdPayload.Session.ApprovalMode != store.AgentApprovalFullAccess {
+		t.Fatalf("new Session ignored default: %#v", createdPayload.Session)
+	}
+	sessionID := createdPayload.Session.ID
+	updatedSession := fixture.request(http.MethodPatch, "/api/v1/agent-sessions/"+sessionID, `{"approval_mode":"per_command"}`, fixture.cookie, true)
+	if updatedSession.Code != http.StatusOK || !strings.Contains(updatedSession.Body.String(), `"approval_mode":"per_command"`) {
+		t.Fatalf("current permission status=%d body=%s", updatedSession.Code, updatedSession.Body.String())
+	}
+	archived := fixture.request(http.MethodPatch, "/api/v1/agent-sessions/"+sessionID, `{"archived":true}`, fixture.cookie, true)
+	if archived.Code != http.StatusOK || !strings.Contains(archived.Body.String(), `"archived_at":"`) {
+		t.Fatalf("archive status=%d body=%s", archived.Code, archived.Body.String())
+	}
+	assertError(t, fixture.request(http.MethodGet, "/api/v1/agent-sessions/"+sessionID, "", fixture.cookie, false), http.StatusNotFound, "NOT_FOUND")
+	index := fixture.request(http.MethodGet, "/api/v1/agent-sessions?view=archived", "", fixture.cookie, false)
+	if index.Code != http.StatusOK || !strings.Contains(index.Body.String(), sessionID) ||
+		!strings.Contains(index.Body.String(), "agent api host") || strings.Contains(index.Body.String(), fixture.ownerID) {
+		t.Fatalf("archived index status=%d body=%s", index.Code, index.Body.String())
+	}
+	restored := fixture.request(http.MethodPatch, "/api/v1/agent-sessions/"+sessionID, `{"archived":false}`, fixture.cookie, true)
+	if restored.Code != http.StatusOK || !strings.Contains(restored.Body.String(), `"archived_at":null`) {
+		t.Fatalf("restore status=%d body=%s", restored.Code, restored.Body.String())
+	}
+	deleted := fixture.request(http.MethodDelete, "/api/v1/agent-sessions/"+sessionID, "", fixture.cookie, true)
+	if deleted.Code != http.StatusNoContent || deleted.Body.Len() != 0 {
+		t.Fatalf("delete status=%d body=%s", deleted.Code, deleted.Body.String())
+	}
+	assertError(t, fixture.request(http.MethodGet, "/api/v1/agent-sessions/"+sessionID, "", fixture.cookie, false), http.StatusNotFound, "NOT_FOUND")
+}
+
 func TestAPILatestDeviceSessionRestoresNewestTranscript(t *testing.T) {
 	fixture := newAPIFixture(t)
 	first, err := fixture.service.CreateSession(context.Background(), fixture.ownerID, fixture.device, store.AgentApprovalPerCommand)
@@ -273,6 +432,92 @@ func TestAPILatestDeviceSessionRestoresNewestTranscript(t *testing.T) {
 	}
 	response = fixture.request(http.MethodGet, "/api/v1/devices/dev_unknown/agent-sessions", "", fixture.cookie, false)
 	assertError(t, response, http.StatusNotFound, "NOT_FOUND")
+}
+
+func TestAPIRecentDeviceSessionIndexIsBoundedSafeAndKeepsLegacyLatest(t *testing.T) {
+	fixture := newAPIFixture(t)
+	assertError(t, fixture.request(http.MethodGet, "/api/v1/devices/"+fixture.device+"/agent-sessions?view=index", "", nil, false), http.StatusUnauthorized, "UNAUTHENTICATED")
+	first, err := fixture.service.CreateSession(context.Background(), fixture.ownerID, fixture.device, store.AgentApprovalPerCommand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := fixture.service.CreateSession(context.Background(), fixture.ownerID, fixture.device, store.AgentApprovalFullAccess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.store.UpdateAgentExternalSessionID(context.Background(), fixture.ownerID, second.ID, "provider-secret-session-sentinel", fixture.now); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.store.UpdateAgentSessionState(context.Background(), fixture.ownerID, second.ID, store.AgentSessionIdle, fixture.now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.store.CreateAgentMessage(context.Background(), fixture.ownerID, store.AgentMessage{
+		ID: "msg_index_first", SessionID: first.ID, Role: "user", Content: "  inspect\nremote host  ", CreatedAt: fixture.now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	response := fixture.request(http.MethodGet, "/api/v1/devices/"+fixture.device+"/agent-sessions?view=index", "", fixture.cookie, false)
+	if response.Code != http.StatusOK {
+		t.Fatalf("index status=%d body=%s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Sessions []sessionSummaryJSON `json:"sessions"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Sessions) != 2 || payload.Sessions[0].ID != second.ID || payload.Sessions[0].Title != "New conversation" ||
+		payload.Sessions[1].ID != first.ID || payload.Sessions[1].Title != "inspect remote host" {
+		t.Fatalf("unexpected index response: %#v", payload)
+	}
+	if strings.Contains(response.Body.String(), "external_session_id") || strings.Contains(response.Body.String(), "provider-secret-session-sentinel") ||
+		strings.Contains(response.Body.String(), fixture.ownerID) {
+		t.Fatalf("session index exposed a private field: %s", response.Body.String())
+	}
+
+	legacy := fixture.request(http.MethodGet, "/api/v1/devices/"+fixture.device+"/agent-sessions", "", fixture.cookie, false)
+	if legacy.Code != http.StatusOK || !strings.Contains(legacy.Body.String(), `"session"`) || strings.Contains(legacy.Body.String(), `"sessions"`) {
+		t.Fatalf("legacy latest response changed: status=%d body=%s", legacy.Code, legacy.Body.String())
+	}
+	for _, path := range []string{
+		"/api/v1/devices/" + fixture.device + "/agent-sessions?view=unknown",
+		"/api/v1/devices/" + fixture.device + "/agent-sessions?view=index&view=index",
+		"/api/v1/devices/" + fixture.device + "/agent-sessions?view=index&limit=999",
+	} {
+		assertError(t, fixture.request(http.MethodGet, path, "", fixture.cookie, false), http.StatusBadRequest, "INVALID_REQUEST")
+	}
+	hidden := fixture.request(http.MethodGet, "/api/v1/devices/dev_unknown/agent-sessions?view=index", "", fixture.cookie, false)
+	if hidden.Code != http.StatusOK || strings.TrimSpace(hidden.Body.String()) != `{"sessions":[]}` {
+		t.Fatalf("unknown Device index leaked state: status=%d body=%s", hidden.Code, hidden.Body.String())
+	}
+	raw, err := sql.Open("sqlite", fixture.dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if _, err := raw.ExecContext(context.Background(),
+		"INSERT INTO users(id, username, password_hash, created_at) VALUES (?, ?, ?, ?)",
+		"usr_foreign_index", "foreign-index", "test-phc", fixture.now.UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	foreignOwner := "usr_foreign_index"
+	if _, err := fixture.store.RegisterDevice(context.Background(), store.Device{
+		ID: "dev_foreign_index", PublicKey: bytes.Repeat([]byte{0x5a}, 32), OwnerUserID: &foreignOwner,
+		Name: "foreign", Platform: "linux", Arch: "amd64", ClientVersion: "test", CreatedAt: fixture.now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.store.CreateAgentSession(context.Background(), store.AgentSession{
+		ID: "ags_foreign_index", UserID: foreignOwner, DeviceID: "dev_foreign_index", ApprovalMode: store.AgentApprovalFullAccess,
+		Provider: "fake", State: store.AgentSessionIdle, CreatedAt: fixture.now, UpdatedAt: fixture.now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	foreign := fixture.request(http.MethodGet, "/api/v1/devices/dev_foreign_index/agent-sessions?view=index", "", fixture.cookie, false)
+	if foreign.Code != http.StatusOK || strings.TrimSpace(foreign.Body.String()) != `{"sessions":[]}` {
+		t.Fatalf("cross-owner Device index leaked state: status=%d body=%s", foreign.Code, foreign.Body.String())
+	}
 }
 
 func TestDuplicateOriginHeadersFailBeforeAuthentication(t *testing.T) {
@@ -627,9 +872,34 @@ func TestSSEBlockedInitialWriteIsBoundedAndUnsubscribes(t *testing.T) {
 	}
 }
 
+func TestMissingProviderCredentialReturnsStableActionableConflict(t *testing.T) {
+	fixture := newAPIFixture(t)
+	service := &staticAgentService{startErr: &agent.AdapterError{
+		Code: "credential_required", Err: errors.New("private provider detail must not escape"),
+	}}
+	api, err := New(Options{
+		Auth: auth.NewService(fixture.store), Agent: service, AllowedOrigin: apiTestOrigin,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: func() time.Time { return fixture.now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/agent-sessions/ags_existing/messages", strings.NewReader(`{"content":"continue"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Origin", apiTestOrigin)
+	request.AddCookie(fixture.cookie)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	assertError(t, response, http.StatusConflict, "PROVIDER_CREDENTIAL_REQUIRED")
+	if strings.Contains(response.Body.String(), "private provider detail") {
+		t.Fatal("credential preflight error leaked provider detail")
+	}
+}
+
 type staticAgentService struct {
 	mu           sync.Mutex
 	subscribeErr error
+	startErr     error
 	events       chan agent.Event
 	unsubscribed chan struct{}
 }
@@ -670,7 +940,31 @@ func (*staticAgentService) Snapshot(context.Context, string, string) (store.Agen
 func (*staticAgentService) LatestSnapshot(context.Context, string, string) (store.AgentSnapshot, error) {
 	return store.AgentSnapshot{}, errors.New("unused")
 }
-func (*staticAgentService) StartTurn(context.Context, string, string, string) (store.AgentMessage, error) {
+func (*staticAgentService) ListSessions(context.Context, string, string) ([]store.AgentSessionSummary, error) {
+	return nil, errors.New("unused")
+}
+func (*staticAgentService) ListArchivedSessions(context.Context, string) ([]store.AgentSessionSummary, error) {
+	return nil, errors.New("unused")
+}
+func (*staticAgentService) Settings(context.Context, string) (store.AgentSettings, error) {
+	return store.AgentSettings{}, errors.New("unused")
+}
+func (*staticAgentService) UpdateSettings(context.Context, string, string) (store.AgentSettings, error) {
+	return store.AgentSettings{}, errors.New("unused")
+}
+func (*staticAgentService) UpdateSessionApprovalMode(context.Context, string, string, string) (store.AgentSession, error) {
+	return store.AgentSession{}, errors.New("unused")
+}
+func (*staticAgentService) SetSessionArchived(context.Context, string, string, bool) (store.AgentSession, error) {
+	return store.AgentSession{}, errors.New("unused")
+}
+func (*staticAgentService) DeleteSession(context.Context, string, string) error {
+	return errors.New("unused")
+}
+func (service *staticAgentService) StartTurn(context.Context, string, string, string) (store.AgentMessage, error) {
+	if service.startErr != nil {
+		return store.AgentMessage{}, service.startErr
+	}
 	return store.AgentMessage{}, errors.New("unused")
 }
 func (*staticAgentService) Decide(context.Context, string, string, string) (store.ToolCall, error) {

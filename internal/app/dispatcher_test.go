@@ -31,6 +31,12 @@ func TestDispatcherExactPathShapes(t *testing.T) {
 		{path: "/api/v1/devices/dev_one/agent-sessions", want: "agent"},
 		{path: "/api/v1/agent-provider/deepseek", want: "agent"},
 		{path: "/api/v1/agent-provider/deepseek/", want: "browser"},
+		{path: "/api/v1/agent-provider/dsh", want: "agent"},
+		{path: "/api/v1/agent-provider/dsh/", want: "browser"},
+		{path: "/api/v1/agent-settings", want: "agent"},
+		{path: "/api/v1/agent-settings/", want: "browser"},
+		{path: "/api/v1/agent-sessions", want: "agent"},
+		{path: "/api/v1/agent-sessions/", want: "browser"},
 		{path: "/api/v1/agent-sessions/ags_one", want: "agent"},
 		{path: "/api/v1/agent-sessions/ags_one/messages", want: "agent"},
 		{path: "/api/v1/agent-sessions/ags_one/events", want: "agent"},
@@ -42,6 +48,7 @@ func TestDispatcherExactPathShapes(t *testing.T) {
 		{path: "/api", want: "browser"},
 		{path: "/api/v1/missing", want: "browser"},
 		{path: "/internal/opencode/remote-exec", want: "NOT_FOUND"},
+		{path: "/internal/dsh/remote-exec", want: "NOT_FOUND"},
 		{path: "/devices/dev_one", want: "static"},
 	}
 	for _, test := range tests {

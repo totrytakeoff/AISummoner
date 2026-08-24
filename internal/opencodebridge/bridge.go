@@ -63,7 +63,12 @@ var (
 // Options contains only process-local bridge dependencies. Task008 owns the
 // listener and must mount Handler on a separate loopback-only server.
 type Options struct {
-	Secret          []byte
+	Secret []byte
+	// CallbackPath and ProofDomain let another private Runtime reuse the same
+	// capability implementation without sharing OpenCode's wire identity. Empty
+	// values preserve the reviewed OpenCode v1 contract.
+	CallbackPath    string
+	ProofDomain     string
 	Now             func() time.Time
 	Logger          *slog.Logger
 	BodyReadTimeout time.Duration
@@ -86,6 +91,8 @@ type Activator interface {
 // handler. It never selects a device from callback input.
 type Bridge struct {
 	secret          []byte
+	callbackPath    string
+	proofDomain     string
 	now             func() time.Time
 	logger          *slog.Logger
 	bodyReadTimeout time.Duration
@@ -135,6 +142,18 @@ func New(options Options) (*Bridge, error) {
 	if options.Now == nil {
 		options.Now = time.Now
 	}
+	if options.CallbackPath == "" {
+		options.CallbackPath = CallbackPath
+	}
+	if !validCallbackPath(options.CallbackPath) {
+		return nil, errors.New("bridge callback path is invalid")
+	}
+	if options.ProofDomain == "" {
+		options.ProofDomain = proofDomain
+	}
+	if len(options.ProofDomain) > 128 || !validProofDomain(options.ProofDomain) {
+		return nil, errors.New("bridge proof domain is invalid")
+	}
 	if options.Logger == nil {
 		options.Logger = slog.Default()
 	}
@@ -150,6 +169,8 @@ func New(options Options) (*Bridge, error) {
 	}
 	return &Bridge{
 		secret:          append([]byte(nil), options.Secret...),
+		callbackPath:    options.CallbackPath,
+		proofDomain:     options.ProofDomain,
 		now:             options.Now,
 		logger:          options.Logger,
 		bodyReadTimeout: options.BodyReadTimeout,
@@ -306,7 +327,7 @@ func (bridge *Bridge) lookup(externalSessionID string) *mapping {
 }
 
 func (bridge *Bridge) serveHTTP(response http.ResponseWriter, request *http.Request) {
-	if request.URL.Path != CallbackPath {
+	if request.URL.Path != bridge.callbackPath {
 		bridge.reject(response, http.StatusNotFound)
 		return
 	}
@@ -471,18 +492,51 @@ func (bridge *Bridge) validProof(request *http.Request, externalSessionID string
 	if err != nil || len(provided) != sha256.Size {
 		return false
 	}
-	expected := signature(bridge.secret, externalSessionID, timestampText)
+	expected := bridge.signature(externalSessionID, timestampText)
 	return hmac.Equal(provided, expected)
 }
 
+func (bridge *Bridge) signature(externalSessionID, timestamp string) []byte {
+	return signProof(bridge.secret, bridge.proofDomain, externalSessionID, timestamp)
+}
+
 func signature(secret []byte, externalSessionID, timestamp string) []byte {
+	return signProof(secret, proofDomain, externalSessionID, timestamp)
+}
+
+func signProof(secret []byte, domain, externalSessionID, timestamp string) []byte {
 	mac := hmac.New(sha256.New, secret)
-	_, _ = mac.Write([]byte(proofDomain))
+	_, _ = mac.Write([]byte(domain))
 	_, _ = mac.Write([]byte{0})
 	_, _ = mac.Write([]byte(externalSessionID))
 	_, _ = mac.Write([]byte{0})
 	_, _ = mac.Write([]byte(timestamp))
 	return mac.Sum(nil)
+}
+
+func validCallbackPath(value string) bool {
+	if len(value) < len("/internal/x") || len(value) > 256 || !strings.HasPrefix(value, "/internal/") ||
+		strings.ContainsAny(value, "?#\\\x00") || strings.Contains(value, "//") {
+		return false
+	}
+	for _, character := range value {
+		if character <= ' ' || character == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+func validProofDomain(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, character := range value {
+		if character < 0x21 || character > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 func loopbackRemote(remoteAddress string) bool {

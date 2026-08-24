@@ -133,11 +133,16 @@ Alpha 的一级流程固定为：
 - 所有 resize、collapse、maximize 和 tab 切换必须可通过键盘完成。
 - 保留语义标题、live region、焦点恢复和 reduced-motion；不能依赖 canvas 文本作为唯一操作入口。
 
-## 5. DSH 参考边界
+## 5. DSH-first Controller 基线
 
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 是第一参考实现，不是要被直接嵌入 AISummoner 的第二套产品后端。
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 是 Controller
+的规范 UX 基线。锁定 checkout
+`47f943859bef60e4160492346772ded9b24f765a`，直接对齐其设计 token、Session
+导航、Conversation、reasoning、tool、approval、composer 和 Settings 行为；
+允许按 MIT 许可证移植 Web 实现并保留第三方声明。DSH 同时是首个 Runtime
+适配目标，但它不能成为 AISummoner 的第二套产品权威。
 
-### 5.1 借鉴的部分
+### 5.1 直接对齐的部分
 
 - 持久有序 Session Event Log 作为对话投影基础。
 - `Session → Turn → Step → Message/Reasoning/Tool` 的交互节奏。
@@ -152,7 +157,8 @@ Alpha 的一级流程固定为：
 - 不复制 DSH 的 Session 数据库或凭据目录。
 - 不允许 DSH 默认本地 shell、文件系统或 Terminal 访问 Server 宿主机。
 - 不让 DSH UI 直连 Provider、Remote 或成为第二个 owner/审批权威。
-- 不把整个 DSH Web 源码 fork 进来长期维护。可以参考 MIT 实现，必要的小段复用必须保留归属和第三方声明；默认优先按交互合同独立实现。
+- 不把 DSH Backend、Session store 或 credential store fork 进来；Web UX 可以
+  source-aligned port，所有实质复用保留 MIT 归属与锁定版本。
 
 DSH 当前仍是 pre-1.0 developer preview，因此集成必须锁定精确版本和协议 fixture，不能依赖未版本化的内部组件路径。
 
@@ -338,7 +344,7 @@ Remote Core Daemon
 
 ## 11. 明确不做的捷径
 
-- 不直接维护/iframe DSH Web 作为最终 Agent 页面。
+- 不 iframe DSH，也不引入其后端权威；Controller Web 以 DSH UX 为长期一等基线维护。
 - 不为每个 Agent Runtime 复制一套 Web 页面。
 - 不解析 Codex/Claude TUI 文本或 ANSI 作为正式协议。
 - 不给任何 sidecar Server 本地 shell 或真实工作区来模拟 Remote。

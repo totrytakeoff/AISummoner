@@ -13,6 +13,7 @@ import (
 const (
 	ProviderFake     = "fake"
 	ProviderDeepSeek = "deepseek"
+	ProviderDSH      = "dsh"
 
 	ToolRemoteExec = "remote_exec"
 
@@ -66,9 +67,16 @@ var (
 )
 
 // Adapter is the provider-neutral boundary implemented by deterministic Fake,
-// the OpenCode sidecar, and direct provider integrations such as DeepSeek.
+// the DSH/OpenCode sidecars, and direct provider integrations such as DeepSeek.
 type Adapter interface {
 	Run(context.Context, RunRequest, EventSink) error
+}
+
+// TurnPreflighter is an optional value-free readiness check performed before a
+// user message is persisted. Provider adapters use it only for actionable
+// configuration state; the provider remains responsible for the real Turn.
+type TurnPreflighter interface {
+	PreflightTurn(context.Context) error
 }
 
 type RunRequest struct {

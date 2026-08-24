@@ -24,6 +24,7 @@ const (
 	sessionCookieName              = "aisummoner_session"
 	maxJSONBodyBytes               = 6*agent.MaxMessageBytes + 1024
 	maxDeepSeekConfigJSONBodyBytes = 16 * 1024
+	maxDSHConfigJSONBodyBytes      = 16 * 1024
 	keepaliveInterval              = 15 * time.Second
 	defaultWriteWait               = 10 * time.Second
 )
@@ -32,6 +33,13 @@ type AgentService interface {
 	CreateSession(context.Context, string, string, string) (store.AgentSession, error)
 	Snapshot(context.Context, string, string) (store.AgentSnapshot, error)
 	LatestSnapshot(context.Context, string, string) (store.AgentSnapshot, error)
+	ListSessions(context.Context, string, string) ([]store.AgentSessionSummary, error)
+	ListArchivedSessions(context.Context, string) ([]store.AgentSessionSummary, error)
+	Settings(context.Context, string) (store.AgentSettings, error)
+	UpdateSettings(context.Context, string, string) (store.AgentSettings, error)
+	UpdateSessionApprovalMode(context.Context, string, string, string) (store.AgentSession, error)
+	SetSessionArchived(context.Context, string, string, bool) (store.AgentSession, error)
+	DeleteSession(context.Context, string, string) error
 	StartTurn(context.Context, string, string, string) (store.AgentMessage, error)
 	Decide(context.Context, string, string, string) (store.ToolCall, error)
 	Subscribe(context.Context, string, string) (<-chan agent.Event, func(), error)
@@ -44,10 +52,23 @@ type ProviderConfigurator interface {
 	ConfigureDeepSeek(context.Context, string, string) error
 }
 
+// DSHCredentialConfigurator writes a provider credential into the private DSH
+// Host store without returning, persisting, or logging its value in AISummoner.
+type DSHCredentialConfigurator interface {
+	ConfigureDSH(context.Context, string) error
+	DescribeDSH(context.Context) (DSHCredentialStatus, error)
+}
+
+type DSHCredentialStatus struct {
+	Configured bool
+	Writable   bool
+}
+
 type Options struct {
 	Auth                 *auth.Service
 	Agent                AgentService
 	ProviderConfigurator ProviderConfigurator
+	DSHConfigurator      DSHCredentialConfigurator
 	AllowedOrigin        string
 	Logger               *slog.Logger
 	Now                  func() time.Time
@@ -59,6 +80,7 @@ type API struct {
 	auth                 *auth.Service
 	agent                AgentService
 	providerConfigurator ProviderConfigurator
+	dshConfigurator      DSHCredentialConfigurator
 	allowedOrigin        string
 	logger               *slog.Logger
 	now                  func() time.Time
@@ -84,8 +106,9 @@ func New(options Options) (*API, error) {
 	}
 	return &API{
 		auth: options.Auth, agent: options.Agent, providerConfigurator: options.ProviderConfigurator,
-		allowedOrigin: options.AllowedOrigin,
-		logger:        options.Logger, now: options.Now, keepalive: options.Keepalive, writeTimeout: options.WriteTimeout,
+		dshConfigurator: options.DSHConfigurator,
+		allowedOrigin:   options.AllowedOrigin,
+		logger:          options.Logger, now: options.Now, keepalive: options.Keepalive, writeTimeout: options.WriteTimeout,
 	}, nil
 }
 
@@ -95,7 +118,7 @@ func (api *API) Handler() http.Handler {
 
 func (api *API) route(writer http.ResponseWriter, request *http.Request) {
 	path := request.URL.Path
-	if request.Method == http.MethodPost && !api.sameOrigin(request) {
+	if (request.Method == http.MethodPost || request.Method == http.MethodPatch || request.Method == http.MethodDelete) && !api.sameOrigin(request) {
 		api.writeError(writer, request, http.StatusForbidden, "ORIGIN_FORBIDDEN", "request origin is not allowed")
 		return
 	}
@@ -104,6 +127,30 @@ func (api *API) route(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	switch {
+	case path == "/api/v1/agent-provider/dsh" && (request.Method == http.MethodGet || request.Method == http.MethodPost):
+		if api.dshConfigurator == nil {
+			api.writeError(writer, authenticated, http.StatusNotFound, "NOT_FOUND", "resource not found")
+			return
+		}
+		if request.Method == http.MethodGet {
+			api.describeDSH(writer, authenticated)
+		} else {
+			api.configureDSH(writer, authenticated)
+		}
+	case path == "/api/v1/agent-settings" && (request.Method == http.MethodGet || request.Method == http.MethodPatch):
+		if request.Method == http.MethodGet {
+			api.getSettings(writer, authenticated, user)
+		} else {
+			api.updateSettings(writer, authenticated, user)
+		}
+	case path == "/api/v1/agent-sessions" && request.Method == http.MethodGet:
+		query := request.URL.Query()
+		views, hasView := query["view"]
+		if len(query) != 1 || !hasView || len(views) != 1 || views[0] != "archived" {
+			api.writeError(writer, authenticated, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+			return
+		}
+		api.listArchivedSessions(writer, authenticated, user)
 	case path == "/api/v1/agent-provider/deepseek" && request.Method == http.MethodPost:
 		if api.providerConfigurator == nil {
 			api.writeError(writer, authenticated, http.StatusNotFound, "NOT_FOUND", "resource not found")
@@ -117,7 +164,16 @@ func (api *API) route(writer http.ResponseWriter, request *http.Request) {
 			return
 		}
 		if request.Method == http.MethodGet {
-			api.latestSession(writer, authenticated, user, deviceID)
+			query := request.URL.Query()
+			views, hasView := query["view"]
+			switch {
+			case len(query) == 0:
+				api.latestSession(writer, authenticated, user, deviceID)
+			case len(query) == 1 && hasView && len(views) == 1 && views[0] == "index":
+				api.listSessions(writer, authenticated, user, deviceID)
+			default:
+				api.writeError(writer, authenticated, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+			}
 		} else {
 			api.createSession(writer, authenticated, user, deviceID)
 		}
@@ -141,8 +197,17 @@ func (api *API) route(writer http.ResponseWriter, request *http.Request) {
 			api.events(writer, authenticated, user, sessionID)
 			return
 		}
-		if request.Method == http.MethodGet && validPathID(remainder) && !strings.Contains(remainder, "/") {
-			api.getSession(writer, authenticated, user, remainder)
+		if validPathID(remainder) && !strings.Contains(remainder, "/") {
+			switch request.Method {
+			case http.MethodGet:
+				api.getSession(writer, authenticated, user, remainder)
+			case http.MethodPatch:
+				api.updateSession(writer, authenticated, user, remainder)
+			case http.MethodDelete:
+				api.deleteSession(writer, authenticated, user, remainder)
+			default:
+				api.writeError(writer, authenticated, http.StatusNotFound, "NOT_FOUND", "resource not found")
+			}
 			return
 		}
 		api.writeError(writer, authenticated, http.StatusNotFound, "NOT_FOUND", "resource not found")
@@ -161,6 +226,34 @@ func (api *API) route(writer http.ResponseWriter, request *http.Request) {
 type deepSeekConfigurationRequest struct {
 	APIKey string `json:"api_key"`
 	Model  string `json:"model"`
+}
+
+type dshConfigurationRequest struct {
+	APIKey string `json:"api_key"`
+}
+
+func (api *API) configureDSH(writer http.ResponseWriter, request *http.Request) {
+	var body dshConfigurationRequest
+	if err := decodeJSONWithLimit(writer, request, &body, maxDSHConfigJSONBodyBytes); err != nil {
+		api.writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		return
+	}
+	if err := api.dshConfigurator.ConfigureDSH(request.Context(), body.APIKey); api.writeServiceError(writer, request, err) {
+		return
+	}
+	writer.Header().Set("Cache-Control", "no-store")
+	writer.WriteHeader(http.StatusNoContent)
+}
+
+func (api *API) describeDSH(writer http.ResponseWriter, request *http.Request) {
+	status, err := api.dshConfigurator.DescribeDSH(request.Context())
+	if api.writeServiceError(writer, request, err) {
+		return
+	}
+	writer.Header().Set("Cache-Control", "no-store")
+	api.writeJSON(writer, http.StatusOK, map[string]any{"credential": map[string]bool{
+		"configured": status.Configured, "writable": status.Writable,
+	}})
 }
 
 func (api *API) configureDeepSeek(writer http.ResponseWriter, request *http.Request) {
@@ -199,6 +292,89 @@ func (api *API) latestSession(writer http.ResponseWriter, request *http.Request,
 		return
 	}
 	api.writeJSON(writer, http.StatusOK, snapshotResponse(snapshot))
+}
+
+func (api *API) listSessions(writer http.ResponseWriter, request *http.Request, user store.User, deviceID string) {
+	values, err := api.agent.ListSessions(request.Context(), user.ID, deviceID)
+	if api.writeServiceError(writer, request, err) {
+		return
+	}
+	sessions := make([]sessionSummaryJSON, 0, len(values))
+	for _, value := range values {
+		sessions = append(sessions, sessionSummaryResponse(value))
+	}
+	api.writeJSON(writer, http.StatusOK, map[string]any{"sessions": sessions})
+}
+
+func (api *API) listArchivedSessions(writer http.ResponseWriter, request *http.Request, user store.User) {
+	values, err := api.agent.ListArchivedSessions(request.Context(), user.ID)
+	if api.writeServiceError(writer, request, err) {
+		return
+	}
+	sessions := make([]sessionSummaryJSON, 0, len(values))
+	for _, value := range values {
+		sessions = append(sessions, sessionSummaryResponse(value))
+	}
+	api.writeJSON(writer, http.StatusOK, map[string]any{"sessions": sessions})
+}
+
+type agentSettingsRequest struct {
+	DefaultApprovalMode string `json:"default_approval_mode"`
+}
+
+func (api *API) getSettings(writer http.ResponseWriter, request *http.Request, user store.User) {
+	settings, err := api.agent.Settings(request.Context(), user.ID)
+	if api.writeServiceError(writer, request, err) {
+		return
+	}
+	api.writeJSON(writer, http.StatusOK, map[string]any{"settings": settingsResponse(settings)})
+}
+
+func (api *API) updateSettings(writer http.ResponseWriter, request *http.Request, user store.User) {
+	var body agentSettingsRequest
+	if err := decodeJSON(writer, request, &body); err != nil {
+		api.writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		return
+	}
+	settings, err := api.agent.UpdateSettings(request.Context(), user.ID, body.DefaultApprovalMode)
+	if api.writeServiceError(writer, request, err) {
+		return
+	}
+	api.writeJSON(writer, http.StatusOK, map[string]any{"settings": settingsResponse(settings)})
+}
+
+type updateSessionRequest struct {
+	ApprovalMode *string `json:"approval_mode,omitempty"`
+	Archived     *bool   `json:"archived,omitempty"`
+}
+
+func (api *API) updateSession(writer http.ResponseWriter, request *http.Request, user store.User, sessionID string) {
+	var body updateSessionRequest
+	if err := decodeJSON(writer, request, &body); err != nil || (body.ApprovalMode == nil) == (body.Archived == nil) {
+		api.writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		return
+	}
+	var (
+		session store.AgentSession
+		err     error
+	)
+	if body.ApprovalMode != nil {
+		session, err = api.agent.UpdateSessionApprovalMode(request.Context(), user.ID, sessionID, *body.ApprovalMode)
+	} else {
+		session, err = api.agent.SetSessionArchived(request.Context(), user.ID, sessionID, *body.Archived)
+	}
+	if api.writeServiceError(writer, request, err) {
+		return
+	}
+	api.writeJSON(writer, http.StatusOK, map[string]any{"session": sessionResponse(session)})
+}
+
+func (api *API) deleteSession(writer http.ResponseWriter, request *http.Request, user store.User, sessionID string) {
+	if err := api.agent.DeleteSession(request.Context(), user.ID, sessionID); api.writeServiceError(writer, request, err) {
+		return
+	}
+	writer.Header().Set("Cache-Control", "no-store")
+	writer.WriteHeader(http.StatusNoContent)
 }
 
 func (api *API) getSession(writer http.ResponseWriter, request *http.Request, user store.User, sessionID string) {
@@ -301,6 +477,7 @@ func (api *API) writeServiceError(writer http.ResponseWriter, request *http.Requ
 	if err == nil {
 		return false
 	}
+	var adapterError *agent.AdapterError
 	switch {
 	case errors.Is(err, agent.ErrNotFound):
 		api.writeError(writer, request, http.StatusNotFound, "NOT_FOUND", "resource not found")
@@ -316,6 +493,12 @@ func (api *API) writeServiceError(writer http.ResponseWriter, request *http.Requ
 		api.writeError(writer, request, http.StatusGatewayTimeout, "TIMEOUT", "operation timed out")
 	case errors.Is(err, agent.ErrServiceClosed):
 		api.writeError(writer, request, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "agent service is unavailable")
+	case errors.As(err, &adapterError) && (adapterError.Code == "provider_unavailable" || adapterError.Code == "rate_limited"):
+		api.writeError(writer, request, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "agent provider is unavailable")
+	case errors.As(err, &adapterError) && adapterError.Code == "credential_required":
+		api.writeError(writer, request, http.StatusConflict, "PROVIDER_CREDENTIAL_REQUIRED", "agent provider credential is required")
+	case errors.As(err, &adapterError):
+		api.writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "provider configuration was rejected")
 	default:
 		api.logger.Error("agent API request failed", "request_id", requestID(request), "path", request.URL.Path)
 		api.writeError(writer, request, http.StatusInternalServerError, "INTERNAL", "internal server error")

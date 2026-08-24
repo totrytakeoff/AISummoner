@@ -1,0 +1,3 @@
+name: AISummoner 远程模式
+description: 仅通过 AISummoner 审批与 SSH 能力操作当前绑定的远程设备。
+order: 0

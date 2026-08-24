@@ -83,6 +83,48 @@ func TestDeploymentContractSources(t *testing.T) {
 	if strings.Contains(serverDockerfile, "COPY web ./web") {
 		t.Fatal("Server Dockerfile must copy explicit Web source/config, not the entire local Web tree")
 	}
+	dshPackager := read("deploy/package-dsh-runtime.sh")
+	for _, required := range []string{
+		"47f943859bef60e4160492346772ded9b24f765a",
+		"node_version=24.19.0",
+		"14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647",
+		"pnpm_version=11.7.0",
+		"--frozen-lockfile", "--offline --trust-lockfile", "--child-concurrency=1", "--max-old-space-size=2048",
+		"dist/node_modules/node-gyp/bin/node-gyp.js", "\"$node\" \"$node_gyp\" rebuild", "node-pty/build/Release/pty.node",
+		"node-pty portable build output is missing",
+		"install -m 0755 \"$node_pty_binary\" \"$node_pty_destination\"",
+		"npm_config_nodedir=$bundle/node",
+		"--filter @deepseek-ai/dsh --prod deploy --offline --ignore-scripts --trust-lockfile",
+		"--config.inject-workspace-packages=true",
+		"python/sdk-runtime/package.json",
+		"materialize-dsh-runtime.mjs", "MemAvailable", "runtime-files.sha256",
+	} {
+		if !strings.Contains(dshPackager, required) {
+			t.Fatalf("DSH runtime packager lacks pinned/private contract %q", required)
+		}
+	}
+	if strings.Contains(dshPackager, "rm -rf") {
+		t.Fatal("DSH runtime packager must clean only its exact private staging tree")
+	}
+	dshContainerPackager := read("deploy/package-dsh-runtime-container.sh")
+	for _, required := range []string{
+		"node@sha256:934240a162082fd8b8a2f90cd5114446443f1eba1c5378f6687167ca405e6584",
+		"--cpus=2", "--memory=3g", "--memory-swap=4g", "--cap-drop=ALL",
+		"--security-opt no-new-privileges", "--user", "package-dsh-runtime.sh",
+	} {
+		if !strings.Contains(dshContainerPackager, required) {
+			t.Fatalf("DSH container packager lacks portable build contract %q", required)
+		}
+	}
+	dshChecker := read("deploy/check-dsh-runtime.sh")
+	for _, required := range []string{
+		"sha256sum --quiet -c runtime-files.sha256", "v24.19.0", "0.1.0-rc.5",
+		"node-pty", "koffi", "sharp", "type l", "Landlock runtime binary",
+	} {
+		if !strings.Contains(dshChecker, required) {
+			t.Fatalf("DSH runtime checker lacks closure contract %q", required)
+		}
+	}
 	dockerignore := read(".dockerignore")
 	for _, required := range []string{
 		".git", ".env.*", "!.env.example", "**/data/**", "*.db", "*.db-*",
@@ -103,6 +145,10 @@ func TestDeploymentContractSources(t *testing.T) {
 	}
 	environmentExample := read(".env.example")
 	for _, required := range []string{
+		"AISUMMONER_DSH_URL=http://127.0.0.1:14096",
+		"AISUMMONER_DSH_NODE_PATH=/opt/aisummoner/dsh/node/bin/node",
+		"AISUMMONER_DSH_CLI_PATH=/opt/aisummoner/dsh/runtime/lib/bin.js",
+		"AISUMMONER_DSH_BRIDGE_URL=http://127.0.0.1:14097/internal/dsh/remote-exec",
 		"AISUMMONER_DEEPSEEK_URL=https://api.deepseek.com",
 		"AISUMMONER_DEEPSEEK_API_KEY=\n",
 		"AISUMMONER_DEEPSEEK_MODEL=\n",

@@ -23,6 +23,13 @@ type Store interface {
 	AgentSessionByOwner(context.Context, string, string) (store.AgentSession, error)
 	AgentSnapshotByOwner(context.Context, string, string) (store.AgentSnapshot, error)
 	LatestAgentSnapshotByDeviceOwner(context.Context, string, string) (store.AgentSnapshot, error)
+	RecentAgentSessionsByDeviceOwner(context.Context, string, string) ([]store.AgentSessionSummary, error)
+	ArchivedAgentSessionsByOwner(context.Context, string) ([]store.AgentSessionSummary, error)
+	AgentSettingsByOwner(context.Context, string) (store.AgentSettings, error)
+	UpdateAgentSettings(context.Context, string, string, time.Time) (store.AgentSettings, error)
+	UpdateAgentSessionApprovalMode(context.Context, string, string, string, time.Time) (store.AgentSession, error)
+	SetAgentSessionArchived(context.Context, string, string, bool, time.Time) (store.AgentSession, error)
+	DeleteAgentSessionByOwner(context.Context, string, string) (store.AgentSession, error)
 	BeginAgentTurn(context.Context, string, string, time.Time) error
 	UpdateAgentSessionState(context.Context, string, string, string, time.Time) error
 	UpdateAgentExternalSessionID(context.Context, string, string, string, time.Time) error
@@ -75,11 +82,12 @@ type Service struct {
 	rootCtx context.Context
 	cancel  context.CancelFunc
 
-	mu      sync.Mutex
-	running map[string]*runningTurn
-	pending map[string]*pendingDecision
-	revoked map[string]string
-	closed  bool
+	mu       sync.Mutex
+	running  map[string]*runningTurn
+	pending  map[string]*pendingDecision
+	revoked  map[string]string
+	archived map[string]string
+	closed   bool
 
 	mutations sync.WaitGroup
 	turns     sync.WaitGroup
@@ -144,7 +152,7 @@ func NewService(options ServiceOptions) (*Service, error) {
 		logger: options.Logger, now: options.Now, turnTimeout: options.TurnTimeout,
 		approvalTimeout: options.ApprovalTimeout, hub: newEventHub(options.SubscriberBuffer),
 		rootCtx: rootCtx, cancel: cancel, running: make(map[string]*runningTurn), pending: make(map[string]*pendingDecision),
-		revoked:   make(map[string]string),
+		revoked: make(map[string]string), archived: make(map[string]string),
 		closeDone: make(chan struct{}),
 	}, nil
 }
@@ -246,7 +254,11 @@ func (s *Service) CreateSession(ctx context.Context, ownerUserID, deviceID, appr
 		return store.AgentSession{}, err
 	}
 	if approvalMode == "" {
-		approvalMode = store.AgentApprovalPerCommand
+		settings, settingsErr := s.store.AgentSettingsByOwner(ctx, ownerUserID)
+		if settingsErr != nil {
+			return store.AgentSession{}, mapStoreNotFound(settingsErr)
+		}
+		approvalMode = settings.DefaultApprovalMode
 	}
 	if approvalMode != store.AgentApprovalPerCommand && approvalMode != store.AgentApprovalFullAccess {
 		return store.AgentSession{}, ErrInvalidRequest
@@ -289,6 +301,125 @@ func (s *Service) LatestSnapshot(ctx context.Context, ownerUserID, deviceID stri
 	return value, nil
 }
 
+// ListSessions returns the Store's fixed-size owner-scoped Controller index.
+// An empty result intentionally covers both no visible Sessions and an
+// unknown/unowned Device without disclosing ownership state.
+func (s *Service) ListSessions(ctx context.Context, ownerUserID, deviceID string) ([]store.AgentSessionSummary, error) {
+	values, err := s.store.RecentAgentSessionsByDeviceOwner(ctx, ownerUserID, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
+func (s *Service) ListArchivedSessions(ctx context.Context, ownerUserID string) ([]store.AgentSessionSummary, error) {
+	values, err := s.store.ArchivedAgentSessionsByOwner(ctx, ownerUserID)
+	if err != nil {
+		return nil, mapStoreNotFound(err)
+	}
+	return values, nil
+}
+
+func (s *Service) Settings(ctx context.Context, ownerUserID string) (store.AgentSettings, error) {
+	settings, err := s.store.AgentSettingsByOwner(ctx, ownerUserID)
+	if err != nil {
+		return store.AgentSettings{}, mapStoreNotFound(err)
+	}
+	return settings, nil
+}
+
+func (s *Service) UpdateSettings(ctx context.Context, ownerUserID, approvalMode string) (store.AgentSettings, error) {
+	if err := s.beginMutation(); err != nil {
+		return store.AgentSettings{}, err
+	}
+	defer s.endMutation()
+	ctx, cancel := s.mutationContext(ctx)
+	defer cancel()
+	if approvalMode != store.AgentApprovalPerCommand && approvalMode != store.AgentApprovalFullAccess {
+		return store.AgentSettings{}, ErrInvalidRequest
+	}
+	settings, err := s.store.UpdateAgentSettings(ctx, ownerUserID, approvalMode, s.now().UTC())
+	if err != nil {
+		return store.AgentSettings{}, mapStoreNotFound(err)
+	}
+	return settings, nil
+}
+
+func (s *Service) UpdateSessionApprovalMode(ctx context.Context, ownerUserID, sessionID, approvalMode string) (store.AgentSession, error) {
+	if err := s.beginMutation(); err != nil {
+		return store.AgentSession{}, err
+	}
+	defer s.endMutation()
+	ctx, cancel := s.mutationContext(ctx)
+	defer cancel()
+	if approvalMode != store.AgentApprovalPerCommand && approvalMode != store.AgentApprovalFullAccess {
+		return store.AgentSession{}, ErrInvalidRequest
+	}
+	session, err := s.store.UpdateAgentSessionApprovalMode(ctx, ownerUserID, sessionID, approvalMode, s.now().UTC())
+	if errors.Is(err, store.ErrConflict) {
+		return store.AgentSession{}, ErrTurnInProgress
+	}
+	if err != nil {
+		return store.AgentSession{}, mapStoreNotFound(err)
+	}
+	s.audit(ctx, ownerUserID, session.DeviceID, "agent.session_permission_changed", map[string]any{
+		"session_id": session.ID, "approval_mode": session.ApprovalMode,
+	})
+	return session, nil
+}
+
+func (s *Service) SetSessionArchived(ctx context.Context, ownerUserID, sessionID string, archived bool) (store.AgentSession, error) {
+	if err := s.beginMutation(); err != nil {
+		return store.AgentSession{}, err
+	}
+	defer s.endMutation()
+	ctx, cancel := s.mutationContext(ctx)
+	defer cancel()
+	session, err := s.store.SetAgentSessionArchived(ctx, ownerUserID, sessionID, archived, s.now().UTC())
+	if errors.Is(err, store.ErrConflict) {
+		return store.AgentSession{}, ErrTurnInProgress
+	}
+	if err != nil {
+		return store.AgentSession{}, mapStoreNotFound(err)
+	}
+	s.mu.Lock()
+	if archived {
+		s.archived[session.ID] = session.DeviceID
+	} else {
+		delete(s.archived, session.ID)
+	}
+	s.mu.Unlock()
+	if archived {
+		s.hub.closeSession(session.ID)
+	}
+	s.audit(ctx, ownerUserID, session.DeviceID, "agent.session_archived", map[string]any{
+		"session_id": session.ID, "archived": archived,
+	})
+	return session, nil
+}
+
+func (s *Service) DeleteSession(ctx context.Context, ownerUserID, sessionID string) error {
+	if err := s.beginMutation(); err != nil {
+		return err
+	}
+	defer s.endMutation()
+	ctx, cancel := s.mutationContext(ctx)
+	defer cancel()
+	session, err := s.store.DeleteAgentSessionByOwner(ctx, ownerUserID, sessionID)
+	if errors.Is(err, store.ErrConflict) {
+		return ErrTurnInProgress
+	} else if err != nil {
+		return mapStoreNotFound(err)
+	}
+	s.mu.Lock()
+	delete(s.archived, session.ID)
+	s.revoked[session.ID] = session.DeviceID
+	s.mu.Unlock()
+	s.hub.closeSession(session.ID)
+	s.audit(ctx, ownerUserID, session.DeviceID, "agent.session_deleted", map[string]any{"session_id": session.ID})
+	return nil
+}
+
 // StartTurn persists the user message synchronously, then runs the bounded
 // provider Turn in the background. It allows exactly one running Turn per
 // product Session.
@@ -305,6 +436,15 @@ func (s *Service) StartTurn(ctx context.Context, ownerUserID, sessionID, content
 	session, err := s.store.AgentSessionByOwner(ctx, ownerUserID, sessionID)
 	if err != nil {
 		return store.AgentMessage{}, mapStoreNotFound(err)
+	}
+	adapter, ok := s.adapterForProvider(session.Provider)
+	if !ok {
+		return store.AgentMessage{}, &AdapterError{Code: "provider_unavailable", Err: errors.New("agent provider is unavailable")}
+	}
+	if preflight, supportsPreflight := adapter.(TurnPreflighter); supportsPreflight {
+		if err := preflight.PreflightTurn(ctx); err != nil {
+			return store.AgentMessage{}, err
+		}
 	}
 	turnCtx, cancel := context.WithTimeout(s.rootCtx, s.turnTimeout)
 	if err := s.reserveTurn(session, ownerUserID, cancel); err != nil {
@@ -331,6 +471,13 @@ func (s *Service) StartTurn(ctx context.Context, ownerUserID, sessionID, content
 		}
 		return store.AgentMessage{}, mapStoreNotFound(err)
 	}
+	session, err = s.store.AgentSessionByOwner(ctx, ownerUserID, session.ID)
+	if err != nil {
+		if !s.isRevoked(sessionID) {
+			s.persistSessionState(ownerUserID, sessionID, store.AgentSessionFailed)
+		}
+		return store.AgentMessage{}, mapStoreNotFound(err)
+	}
 	message := store.AgentMessage{ID: messageID, SessionID: session.ID, Role: "user", Content: content, CreatedAt: now}
 	if err := s.store.CreateAgentMessage(ctx, ownerUserID, message); err != nil {
 		if !s.isRevoked(session.ID) {
@@ -350,6 +497,9 @@ func (s *Service) reserveTurn(session store.AgentSession, ownerUserID string, ca
 		return ErrServiceClosed
 	}
 	if _, revoked := s.revoked[session.ID]; revoked {
+		return ErrNotFound
+	}
+	if _, archived := s.archived[session.ID]; archived {
 		return ErrNotFound
 	}
 	if _, exists := s.running[session.ID]; exists {
@@ -476,13 +626,17 @@ func conversationHistory(messages []store.AgentMessage) []ConversationMessage {
 }
 
 func (s *Service) persistTurnTranscript(session store.AgentSession, sink *turnSink) error {
+	completedAt := s.now().UTC()
 	values := []struct {
 		role      string
 		content   string
 		createdAt time.Time
 	}{
 		{role: "reasoning", content: sink.reasoning.String(), createdAt: sink.reasoningStartedAt},
-		{role: "assistant", content: sink.text.String(), createdAt: sink.textStartedAt},
+		// The bounded projection stores one final assistant message per Turn.
+		// Timestamp it at completion so replay cannot place its command card
+		// below output that only exists after the command finished.
+		{role: "assistant", content: sink.text.String(), createdAt: completedAt},
 	}
 	for _, value := range values {
 		if value.content == "" {
@@ -558,6 +712,9 @@ func (s *Service) Subscribe(ctx context.Context, ownerUserID, sessionID string) 
 		return nil, nil, ErrServiceClosed
 	}
 	if _, revoked := s.revoked[sessionID]; revoked {
+		return nil, nil, ErrNotFound
+	}
+	if _, archived := s.archived[sessionID]; archived {
 		return nil, nil, ErrNotFound
 	}
 	// The runtime tombstone check and registration are one Service-mutex
@@ -677,6 +834,9 @@ func (s *Service) publish(sessionID, eventType string, payload any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, revoked := s.revoked[sessionID]; revoked {
+		return
+	}
+	if _, archived := s.archived[sessionID]; archived {
 		return
 	}
 	s.hub.publish(event)

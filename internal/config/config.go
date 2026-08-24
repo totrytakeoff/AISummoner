@@ -22,11 +22,18 @@ const (
 	defaultBridgeListenAddr = "127.0.0.1:4097"
 	defaultBridgeURL        = "http://127.0.0.1:4097/internal/opencode/remote-exec"
 	defaultWorkspaceDir     = "agent-workspaces"
+	defaultDSHURL           = "http://127.0.0.1:14096"
+	defaultDSHBridgeAddr    = "127.0.0.1:14097"
+	defaultDSHBridgeURL     = "http://127.0.0.1:14097/internal/dsh/remote-exec"
+	defaultDSHNodePath      = "/opt/aisummoner/dsh/node/bin/node"
+	defaultDSHCLIPath       = "/opt/aisummoner/dsh/runtime/lib/bin.js"
+	defaultDSHHomeDir       = "dsh"
 	minimumSecretSize       = 32
 
 	AgentAdapterFake     = "fake"
 	AgentAdapterOpenCode = "opencode"
 	AgentAdapterDeepSeek = "deepseek"
+	AgentAdapterDSH      = "dsh"
 )
 
 // Config is immutable after startup. Secret fields must never be logged.
@@ -53,6 +60,11 @@ type Config struct {
 	DeepSeekURL           string
 	DeepSeekAPIKey        string
 	DeepSeekModel         string
+	DSHURL                string
+	DSHNodePath           string
+	DSHCLIPath            string
+	DSHHome               string
+	DSHBridgeURL          string
 	TrustedProxyIPs       []netip.Addr
 }
 
@@ -125,9 +137,60 @@ func load(lookup lookupEnv) (Config, error) {
 		return loadOpenCode(configuration, lookup)
 	case AgentAdapterDeepSeek:
 		return loadDeepSeek(configuration, lookup)
+	case AgentAdapterDSH:
+		return loadDSH(configuration, lookup)
 	default:
-		return Config{}, errors.New("AISUMMONER_AGENT_ADAPTER must be fake, opencode, or deepseek")
+		return Config{}, errors.New("AISUMMONER_AGENT_ADAPTER must be fake, dsh, opencode, or deepseek")
 	}
+}
+
+func loadDSH(configuration Config, lookup lookupEnv) (Config, error) {
+	hostURL, err := parseLoopbackOrigin(env(lookup, "AISUMMONER_DSH_URL", defaultDSHURL), "AISUMMONER_DSH_URL")
+	if err != nil {
+		return Config{}, err
+	}
+	if hostURL.Port() == "" {
+		return Config{}, errors.New("AISUMMONER_DSH_URL must contain an explicit port")
+	}
+	nodePath, err := absoluteFilePath(env(lookup, "AISUMMONER_DSH_NODE_PATH", defaultDSHNodePath), "AISUMMONER_DSH_NODE_PATH")
+	if err != nil {
+		return Config{}, err
+	}
+	cliPath, err := absoluteFilePath(env(lookup, "AISUMMONER_DSH_CLI_PATH", defaultDSHCLIPath), "AISUMMONER_DSH_CLI_PATH")
+	if err != nil {
+		return Config{}, err
+	}
+	home, err := absoluteDirectory(env(lookup, "AISUMMONER_DSH_HOME", filepath.Join(configuration.DataDir, defaultDSHHomeDir)), "AISUMMONER_DSH_HOME")
+	if err != nil {
+		return Config{}, err
+	}
+	bridgeListenAddr := env(lookup, "AISUMMONER_AGENT_BRIDGE_LISTEN_ADDR", defaultDSHBridgeAddr)
+	if err := validateListenAddress(bridgeListenAddr, true); err != nil {
+		return Config{}, fmt.Errorf("AISUMMONER_AGENT_BRIDGE_LISTEN_ADDR: %w", err)
+	}
+	bridgeURL, err := parseExactLoopbackCallback(
+		env(lookup, "AISUMMONER_DSH_BRIDGE_URL", defaultDSHBridgeURL),
+		"AISUMMONER_DSH_BRIDGE_URL", "/internal/dsh/remote-exec",
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	if bridgeURL.Host != bridgeListenAddr {
+		return Config{}, errors.New("AISUMMONER_DSH_BRIDGE_URL authority must match AISUMMONER_AGENT_BRIDGE_LISTEN_ADDR")
+	}
+	bridgeSecret, err := requiredSecret(lookup, "AISUMMONER_AGENT_BRIDGE_SECRET")
+	if err != nil {
+		return Config{}, err
+	}
+
+	configuration.DSHURL = hostURL.String()
+	configuration.DSHNodePath = nodePath
+	configuration.DSHCLIPath = cliPath
+	configuration.DSHHome = home
+	configuration.DSHBridgeURL = bridgeURL.String()
+	configuration.AgentBridgeListenAddr = bridgeListenAddr
+	configuration.AgentBridgeSecret = bridgeSecret
+	return configuration, nil
 }
 
 func loadDeepSeek(configuration Config, lookup lookupEnv) (Config, error) {
@@ -238,6 +301,11 @@ func (configuration Config) PreparePrivateDirectories() error {
 			path string
 			name string
 		}{configuration.AgentWorkspaceRoot, "AISUMMONER_AGENT_WORKSPACE_ROOT"})
+	} else if configuration.AgentAdapter == AgentAdapterDSH {
+		directories = append(directories, struct {
+			path string
+			name string
+		}{configuration.DSHHome, "AISUMMONER_DSH_HOME"})
 	}
 	for _, directory := range directories {
 		if err := preparePrivateDirectory(directory.path, directory.name); err != nil {
@@ -329,16 +397,20 @@ func parseLoopbackOrigin(value, name string) (*url.URL, error) {
 }
 
 func parseBridgeURL(value string) (*url.URL, error) {
+	return parseExactLoopbackCallback(value, "AISUMMONER_OPENCODE_BRIDGE_URL", "/internal/opencode/remote-exec")
+}
+
+func parseExactLoopbackCallback(value, name, path string) (*url.URL, error) {
 	parsed, err := url.Parse(value)
 	if err != nil || parsed.Scheme != "http" || parsed.Host == "" || parsed.User != nil || parsed.Opaque != "" || parsed.RawPath != "" ||
-		parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path != "/internal/opencode/remote-exec" {
-		return nil, errors.New("AISUMMONER_OPENCODE_BRIDGE_URL must be the exact loopback HTTP callback URL")
+		parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path != path {
+		return nil, fmt.Errorf("%s must be the exact loopback HTTP callback URL", name)
 	}
 	if !isLiteralLoopback(parsed.Hostname()) {
-		return nil, errors.New("AISUMMONER_OPENCODE_BRIDGE_URL must use a literal loopback address")
+		return nil, fmt.Errorf("%s must use a literal loopback address", name)
 	}
 	if _, err := normalizedPort(parsed); err != nil {
-		return nil, errors.New("AISUMMONER_OPENCODE_BRIDGE_URL must contain a valid port")
+		return nil, fmt.Errorf("%s must contain a valid port", name)
 	}
 	return parsed, nil
 }
@@ -385,6 +457,17 @@ func absoluteDirectory(value, name string) (string, error) {
 		return "", fmt.Errorf("resolve %s: %w", name, err)
 	}
 	absolute = filepath.Clean(absolute)
+	if absolute == string(filepath.Separator) {
+		return "", fmt.Errorf("%s must not be the filesystem root", name)
+	}
+	return absolute, nil
+}
+
+func absoluteFilePath(value, name string) (string, error) {
+	if value == "" || strings.IndexByte(value, 0) >= 0 || !filepath.IsAbs(value) {
+		return "", fmt.Errorf("%s must be an absolute file path", name)
+	}
+	absolute := filepath.Clean(value)
 	if absolute == string(filepath.Separator) {
 		return "", fmt.Errorf("%s must not be the filesystem root", name)
 	}

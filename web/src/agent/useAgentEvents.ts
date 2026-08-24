@@ -13,7 +13,7 @@ import type { AgentViewState, ParsedAgentEvent } from './events'
 
 export type AgentStreamState = 'idle' | 'connecting' | 'open' | 'error'
 
-const streamDisconnectedMessage = 'Agent event stream disconnected. Waiting to reconnect…'
+const streamDisconnectedMessage = 'Agent 事件流已断开，正在等待重连…'
 
 interface Submission {
   id: string

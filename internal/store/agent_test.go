@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -165,6 +167,111 @@ func TestLatestAgentSnapshotByDeviceOwnerReturnsNewestTranscript(t *testing.T) {
 	}
 }
 
+func TestRecentAgentSessionsByDeviceOwnerIsBoundedOrderedAndOwnerScoped(t *testing.T) {
+	ctx := context.Background()
+	database, err := Open(ctx, filepath.Join(t.TempDir(), "agent-index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	now := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
+	owner, _, err := database.BootstrapAdmin(ctx, "usr_index", "admin", "test-phc", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerID := owner.ID
+	deviceID := "dev_index"
+	if _, err := database.RegisterDevice(ctx, Device{
+		ID: deviceID, PublicKey: bytes.Repeat([]byte{0x79}, 32), OwnerUserID: &ownerID,
+		Name: "indexed", Platform: "linux", Arch: "amd64", ClientVersion: "test", CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 53; index++ {
+		createdAt := now.Add(time.Duration(index) * time.Minute)
+		sessionID := fmt.Sprintf("ags_%03d", index)
+		if err := database.CreateAgentSession(ctx, AgentSession{
+			ID: sessionID, UserID: ownerID, DeviceID: deviceID, ApprovalMode: AgentApprovalPerCommand,
+			Provider: "deepseek", State: AgentSessionIdle, CreatedAt: createdAt, UpdatedAt: createdAt,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	longTitle := "  inspect\n\t" + strings.Repeat("x", 100) + "  "
+	if err := database.CreateAgentMessage(ctx, ownerID, AgentMessage{
+		ID: "msg_index_title", SessionID: "ags_052", Role: "user", Content: longTitle, CreatedAt: now.Add(54 * time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.CreateAgentMessage(ctx, ownerID, AgentMessage{
+		ID: "msg_index_later", SessionID: "ags_052", Role: "user", Content: "must not replace the title", CreatedAt: now.Add(55 * time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.db.ExecContext(ctx, "UPDATE agent_sessions SET state = ? WHERE id = ?", AgentSessionRevoked, "ags_051"); err != nil {
+		t.Fatal(err)
+	}
+
+	values, err := database.RecentAgentSessionsByDeviceOwner(ctx, ownerID, deviceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != recentAgentSessionLimit {
+		t.Fatalf("session index size=%d want=%d", len(values), recentAgentSessionLimit)
+	}
+	if values[0].ID != "ags_052" || values[1].ID != "ags_050" || values[len(values)-1].ID != "ags_002" {
+		t.Fatalf("unexpected bounded order: first=%q second=%q last=%q", values[0].ID, values[1].ID, values[len(values)-1].ID)
+	}
+	if values[0].Title != "inspect "+strings.Repeat("x", 71)+"…" || len([]rune(values[0].Title)) != agentSessionTitleRunes {
+		t.Fatalf("unexpected normalized title %q (%d runes)", values[0].Title, len([]rune(values[0].Title)))
+	}
+	if values[1].Title != "New conversation" {
+		t.Fatalf("empty title fallback=%q", values[1].Title)
+	}
+	for _, value := range values {
+		if value.ID == "ags_051" {
+			t.Fatal("revoked Session appeared in recent index")
+		}
+	}
+
+	for name, request := range map[string]struct{ owner, device string }{
+		"wrong owner":    {owner: "usr_other", device: deviceID},
+		"unknown device": {owner: ownerID, device: "dev_unknown"},
+	} {
+		hidden, err := database.RecentAgentSessionsByDeviceOwner(ctx, request.owner, request.device)
+		if err != nil || len(hidden) != 0 {
+			t.Fatalf("%s index=%#v err=%v", name, hidden, err)
+		}
+	}
+	if _, err := database.UnpairDevice(ctx, ownerID, deviceID, now.Add(60*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	hidden, err := database.RecentAgentSessionsByDeviceOwner(ctx, ownerID, deviceID)
+	if err != nil || len(hidden) != 0 {
+		t.Fatalf("former owner index=%#v err=%v", hidden, err)
+	}
+	repairDigest := bytes.Repeat([]byte{0x7a}, 32)
+	if err := database.CreatePairingCode(ctx, PairingCode{
+		ID: "pair_index_repair", DeviceID: deviceID, CodeDigest: repairDigest,
+		CreatedAt: now.Add(61 * time.Minute), ExpiresAt: now.Add(71 * time.Minute),
+	}, now.Add(61*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ClaimPairing(ctx, ownerID, repairDigest, now.Add(62*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.CreateAgentSession(ctx, AgentSession{
+		ID: "ags_fresh", UserID: ownerID, DeviceID: deviceID, ApprovalMode: AgentApprovalPerCommand,
+		Provider: "deepseek", State: AgentSessionIdle, CreatedAt: now.Add(63 * time.Minute), UpdatedAt: now.Add(63 * time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	visible, err := database.RecentAgentSessionsByDeviceOwner(ctx, ownerID, deviceID)
+	if err != nil || len(visible) != 1 || visible[0].ID != "ags_fresh" {
+		t.Fatalf("same-owner re-pair revived old Sessions: %#v err=%v", visible, err)
+	}
+}
+
 func TestAgentApprovalAbortAndDecisionHaveOneDurableWinner(t *testing.T) {
 	ctx := context.Background()
 	database, err := Open(ctx, filepath.Join(t.TempDir(), "agent-approval-winner.db"))
@@ -300,5 +407,115 @@ func TestRevokedSessionOwnerSurfaceAndMutationsStayHiddenAfterRepair(t *testing.
 	}
 	if state != AgentSessionRevoked || approval != AgentApprovalFullAccess {
 		t.Fatalf("revoked Session changed: state=%q approval=%q", state, approval)
+	}
+}
+
+func TestAgentSettingsPermissionArchiveRestoreAndDeleteAreOwnerScoped(t *testing.T) {
+	ctx := context.Background()
+	database, err := Open(ctx, filepath.Join(t.TempDir(), "agent-management.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	now := time.Date(2026, 8, 24, 3, 0, 0, 0, time.UTC)
+	owner, _, err := database.BootstrapAdmin(ctx, "usr_management", "admin", "test-phc", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerID := owner.ID
+	deviceID := "dev_management"
+	if _, err := database.RegisterDevice(ctx, Device{
+		ID: deviceID, PublicKey: bytes.Repeat([]byte{0x83}, 32), OwnerUserID: &ownerID,
+		Name: "managed device", Platform: "linux", Arch: "amd64", ClientVersion: "test", CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	settings, err := database.AgentSettingsByOwner(ctx, ownerID)
+	if err != nil || settings.DefaultApprovalMode != AgentApprovalPerCommand || settings.UpdatedAt != nil {
+		t.Fatalf("default settings=%#v err=%v", settings, err)
+	}
+	settings, err = database.UpdateAgentSettings(ctx, ownerID, AgentApprovalFullAccess, now.Add(time.Second))
+	if err != nil || settings.DefaultApprovalMode != AgentApprovalFullAccess || settings.UpdatedAt == nil {
+		t.Fatalf("updated settings=%#v err=%v", settings, err)
+	}
+	if _, err := database.UpdateAgentSettings(ctx, "usr_other", AgentApprovalFullAccess, now); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("wrong-owner settings update=%v", err)
+	}
+
+	session := AgentSession{
+		ID: "ags_management", UserID: ownerID, DeviceID: deviceID, ApprovalMode: AgentApprovalPerCommand,
+		Provider: "dsh", State: AgentSessionIdle, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := database.CreateAgentSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.CreateAgentMessage(ctx, ownerID, AgentMessage{
+		ID: "msg_management", SessionID: session.ID, Role: "user", Content: "keep this transcript", CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.CreateAgentToolCall(ctx, ownerID, ToolCall{
+		ID: "tool_management", SessionID: session.ID, Name: "remote_exec", ArgumentsJSON: `{"command":"hostname"}`,
+		Status: ToolCallStarted, CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := database.UpdateAgentSessionApprovalMode(ctx, ownerID, session.ID, AgentApprovalFullAccess, now.Add(2*time.Second))
+	if err != nil || updated.ApprovalMode != AgentApprovalFullAccess {
+		t.Fatalf("permission update=%#v err=%v", updated, err)
+	}
+	if _, err := database.db.ExecContext(ctx, "UPDATE agent_sessions SET state = ? WHERE id = ?", AgentSessionRunning, session.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.UpdateAgentSessionApprovalMode(ctx, ownerID, session.ID, AgentApprovalPerCommand, now); !errors.Is(err, ErrConflict) {
+		t.Fatalf("running permission update=%v", err)
+	}
+	if _, err := database.SetAgentSessionArchived(ctx, ownerID, session.ID, true, now); !errors.Is(err, ErrConflict) {
+		t.Fatalf("running archive=%v", err)
+	}
+	if _, err := database.db.ExecContext(ctx, "UPDATE agent_sessions SET state = ? WHERE id = ?", AgentSessionFailed, session.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	archived, err := database.SetAgentSessionArchived(ctx, ownerID, session.ID, true, now.Add(3*time.Second))
+	if err != nil || archived.ArchivedAt == nil {
+		t.Fatalf("archive=%#v err=%v", archived, err)
+	}
+	if _, err := database.AgentSessionByOwner(ctx, ownerID, session.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("archived session remained active: %v", err)
+	}
+	active, err := database.RecentAgentSessionsByDeviceOwner(ctx, ownerID, deviceID)
+	if err != nil || len(active) != 0 {
+		t.Fatalf("active index after archive=%#v err=%v", active, err)
+	}
+	archivedIndex, err := database.ArchivedAgentSessionsByOwner(ctx, ownerID)
+	if err != nil || len(archivedIndex) != 1 || archivedIndex[0].ID != session.ID ||
+		archivedIndex[0].DeviceName != "managed device" || archivedIndex[0].Title != "keep this transcript" {
+		t.Fatalf("archived index=%#v err=%v", archivedIndex, err)
+	}
+	wrongOwnerIndex, err := database.ArchivedAgentSessionsByOwner(ctx, "usr_other")
+	if err != nil || len(wrongOwnerIndex) != 0 {
+		t.Fatalf("wrong-owner archived index=%#v err=%v", wrongOwnerIndex, err)
+	}
+	restored, err := database.SetAgentSessionArchived(ctx, ownerID, session.ID, false, now.Add(4*time.Second))
+	if err != nil || restored.ArchivedAt != nil {
+		t.Fatalf("restore=%#v err=%v", restored, err)
+	}
+	if _, err := database.AgentSessionByOwner(ctx, ownerID, session.ID); err != nil {
+		t.Fatalf("restored session unavailable: %v", err)
+	}
+
+	deleted, err := database.DeleteAgentSessionByOwner(ctx, ownerID, session.ID)
+	if err != nil || deleted.ID != session.ID {
+		t.Fatalf("delete=%#v err=%v", deleted, err)
+	}
+	for table, id := range map[string]string{
+		"agent_sessions": session.ID, "agent_messages": "msg_management", "tool_calls": "tool_management",
+	} {
+		var count int
+		if err := database.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE id = ?", id).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("%s cascade count=%d err=%v", table, count, err)
+		}
 	}
 }

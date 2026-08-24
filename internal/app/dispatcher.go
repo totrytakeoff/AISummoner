@@ -94,7 +94,8 @@ func classifyPath(value string) routeKind {
 		return routeTerminal
 	case oneSegmentBetween(value, "/api/v1/devices/", "/agent-sessions"):
 		return routeAgent
-	case value == "/api/v1/agent-provider/deepseek":
+	case value == "/api/v1/agent-provider/deepseek" || value == "/api/v1/agent-provider/dsh" ||
+		value == "/api/v1/agent-settings" || value == "/api/v1/agent-sessions":
 		return routeAgent
 	case agentSessionPath(value), oneSegmentBetween(value, "/api/v1/tool-calls/", "/decision"):
 		return routeAgent

@@ -22,6 +22,7 @@ import (
 	"github.com/aisummoner/aisummoner/internal/agent"
 	"github.com/aisummoner/aisummoner/internal/app"
 	"github.com/aisummoner/aisummoner/internal/config"
+	"github.com/aisummoner/aisummoner/internal/dsh"
 	"github.com/aisummoner/aisummoner/internal/httpapi"
 	"github.com/aisummoner/aisummoner/internal/identity"
 	"github.com/aisummoner/aisummoner/internal/opencodebridge"
@@ -37,6 +38,24 @@ type adapterRegistryProbe struct {
 	provider string
 	adapter  agent.Adapter
 	err      error
+}
+
+type dshCredentialProbe struct {
+	key      string
+	writable bool
+	err      error
+}
+
+func (probe *dshCredentialProbe) ConfigureCredential(_ context.Context, key string) error {
+	probe.key = key
+	return probe.err
+}
+
+func (probe *dshCredentialProbe) DescribeCredential(context.Context) (dsh.CredentialStatus, error) {
+	if probe.err != nil {
+		return dsh.CredentialStatus{}, probe.err
+	}
+	return dsh.CredentialStatus{Configured: probe.key != "", Writable: probe.writable}, nil
 }
 
 func (probe *adapterRegistryProbe) SetAdapter(provider string, adapter agent.Adapter) error {
@@ -732,6 +751,29 @@ func TestBuiltServerOpenCodeStartupFailuresUnwindBridge(t *testing.T) {
 	}
 }
 
+func TestBuiltServerDSHStartupFailureUnwindsPrivateBridge(t *testing.T) {
+	publicAddress := reserveLoopbackAddress(t)
+	bridgeAddress := reserveLoopbackAddress(t)
+	dataDirectory := t.TempDir()
+	configuration := config.Config{
+		BaseURL: mustURL(t, "http://"+publicAddress), ListenAddr: publicAddress,
+		DataDir: dataDirectory, DatabasePath: filepath.Join(dataDirectory, "aisummoner.db"),
+		AdminPassword: integrationPassword, SessionSecret: bytes.Repeat([]byte{0x61}, 32),
+		PairingSecret: bytes.Repeat([]byte{0x62}, 32), DevMode: true,
+		AllowedOrigin: "http://" + publicAddress, AgentAdapter: config.AgentAdapterDSH,
+		DSHURL: "http://127.0.0.1:14096", DSHNodePath: filepath.Join(dataDirectory, "missing-node"),
+		DSHCLIPath: filepath.Join(dataDirectory, "missing-cli.js"), DSHHome: filepath.Join(dataDirectory, "dsh"),
+		AgentBridgeListenAddr: bridgeAddress, DSHBridgeURL: "http://" + bridgeAddress + dsh.CallbackPath,
+		AgentBridgeSecret: bytes.Repeat([]byte{0x63}, 32),
+	}
+	server, err := buildServer(context.Background(), configuration, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if server != nil || err == nil || strings.Contains(err.Error(), configuration.DSHNodePath) {
+		t.Fatalf("DSH startup result server=%v error=%v", server, err)
+	}
+	assertAddressReusable(t, bridgeAddress)
+	assertAddressReusable(t, publicAddress)
+}
+
 func openCodeConfiguration(t *testing.T, publicAddress, bridgeAddress, sidecarURL string) config.Config {
 	t.Helper()
 	dataDirectory := t.TempDir()
@@ -812,6 +854,32 @@ func TestDeepSeekProviderConfiguratorValidatesBeforeRegistryMutation(t *testing.
 	}
 	if probe.provider != agent.ProviderDeepSeek || probe.adapter == nil {
 		t.Fatalf("registry provider=%q adapter=%T", probe.provider, probe.adapter)
+	}
+}
+
+func TestDSHProviderConfiguratorForwardsOnlyToPrivateCredentialWriter(t *testing.T) {
+	probe := &dshCredentialProbe{writable: true}
+	configurator := &dshProviderConfigurator{writer: probe}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := configurator.ConfigureDSH(canceled, "must-not-forward"); !errors.Is(err, context.Canceled) || probe.key != "" {
+		t.Fatalf("canceled configuration error=%v key forwarded=%v", err, probe.key != "")
+	}
+	if err := configurator.ConfigureDSH(context.Background(), "private-provider-key"); err != nil {
+		t.Fatal(err)
+	}
+	if probe.key != "private-provider-key" {
+		t.Fatalf("credential writer received expected key=%v", probe.key == "private-provider-key")
+	}
+	status, err := configurator.DescribeDSH(context.Background())
+	if err != nil || !status.Configured || !status.Writable {
+		t.Fatalf("credential status=%#v err=%v", status, err)
+	}
+	if err := (*dshProviderConfigurator)(nil).ConfigureDSH(context.Background(), "key"); !errors.Is(err, agent.ErrServiceClosed) {
+		t.Fatalf("nil configurator error=%v", err)
+	}
+	if _, err := (*dshProviderConfigurator)(nil).DescribeDSH(context.Background()); !errors.Is(err, agent.ErrServiceClosed) {
+		t.Fatalf("nil credential status error=%v", err)
 	}
 }
 
@@ -989,6 +1057,8 @@ func TestServerSourceHasNoPostTransferDatabaseOrTunnelDefer(t *testing.T) {
 		"deepseek.NewAdapter", "APIKey: configuration.DeepSeekAPIKey", "provider = deepseek.ProviderName",
 		"ProviderConfigurator: &deepSeekProviderConfigurator{registry: agentService}",
 		"BaseURL: deepseek.DefaultBaseURL", "registry.SetAdapter(agent.ProviderDeepSeek, adapter)",
+		"dsh.NewAdapter", "dsh.StartHost", "CallbackPath: dsh.CallbackPath", "ProofDomain: dsh.ProofDomain",
+		"provider = dsh.ProviderName", "DSHConfigurator:      dshConfigurator",
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("composition source lacks required wiring %q", required)
@@ -997,8 +1067,9 @@ func TestServerSourceHasNoPostTransferDatabaseOrTunnelDefer(t *testing.T) {
 	if strings.Count(source, "devicegate.New()") != 1 {
 		t.Fatalf("composition must construct exactly one shared Device lifecycle gate; count=%d", strings.Count(source, "devicegate.New()"))
 	}
-	if strings.Contains(source, "Handle(opencodebridge.CallbackPath") || strings.Contains(source, "Handle(\"/internal/opencode") {
-		t.Fatal("composition directly mounted the OpenCode Bridge on a public handler")
+	if strings.Contains(source, "Handle(opencodebridge.CallbackPath") || strings.Contains(source, "Handle(\"/internal/opencode") ||
+		strings.Contains(source, "Handle(dsh.CallbackPath") || strings.Contains(source, "Handle(\"/internal/dsh") {
+		t.Fatal("composition directly mounted a capability Bridge on a public handler")
 	}
 }
 

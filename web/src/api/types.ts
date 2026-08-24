@@ -35,7 +35,31 @@ export interface AgentSession {
   provider?: string
   created_at?: string
   updated_at?: string
+  archived_at?: string | null
   [key: string]: unknown
+}
+
+export interface AgentSessionSummary {
+  id: string
+  device_id: string
+  device_name: string
+  approval_mode: ApprovalMode
+  state: string
+  provider: string
+  title: string
+  created_at: string
+  updated_at: string
+  archived_at: string | null
+}
+
+export interface AgentSettings {
+  default_approval_mode: ApprovalMode
+  updated_at: string | null
+}
+
+export interface DSHCredentialStatus {
+  configured: boolean
+  writable: boolean
 }
 
 export interface AgentMessage {

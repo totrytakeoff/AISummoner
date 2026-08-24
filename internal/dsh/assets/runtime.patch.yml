@@ -1,0 +1,13 @@
+- id: agent-presets
+  config:
+    default: aisummoner
+    includeUserRoot: true
+
+- id: session-title-llm
+  disabled: true
+
+- id: web-runtime
+  config:
+    printUrl: false
+    surfaceContext: false
+    trustedHosts: []

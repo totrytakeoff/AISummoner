@@ -17,6 +17,11 @@ func TestLoadDevelopmentFakeConfig(t *testing.T) {
 	values["AISUMMONER_DEEPSEEK_URL"] = "https://provider.invalid"
 	values["AISUMMONER_DEEPSEEK_API_KEY"] = "ignored-deepseek-secret"
 	values["AISUMMONER_DEEPSEEK_MODEL"] = "ignored-model"
+	values["AISUMMONER_DSH_URL"] = "https://public.invalid/leak"
+	values["AISUMMONER_DSH_NODE_PATH"] = "relative-node"
+	values["AISUMMONER_DSH_CLI_PATH"] = "relative-cli"
+	values["AISUMMONER_DSH_HOME"] = string(filepath.Separator)
+	values["AISUMMONER_DSH_BRIDGE_URL"] = "https://public.invalid/leak"
 
 	configuration, err := load(mapLookup(values))
 	if err != nil {
@@ -34,8 +39,81 @@ func TestLoadDevelopmentFakeConfig(t *testing.T) {
 	if configuration.AgentAdapter != AgentAdapterFake || configuration.OpenCodeURL != "" ||
 		configuration.OpenCodePassword != "" || len(configuration.AgentBridgeSecret) != 0 ||
 		configuration.AgentBridgeListenAddr != "" || configuration.AgentWorkspaceRoot != "" ||
-		configuration.DeepSeekURL != "" || configuration.DeepSeekAPIKey != "" || configuration.DeepSeekModel != "" {
+		configuration.DeepSeekURL != "" || configuration.DeepSeekAPIKey != "" || configuration.DeepSeekModel != "" ||
+		configuration.DSHURL != "" || configuration.DSHNodePath != "" || configuration.DSHCLIPath != "" ||
+		configuration.DSHHome != "" || configuration.DSHBridgeURL != "" {
 		t.Fatalf("fake mode retained provider-only configuration: %#v", configuration)
+	}
+}
+
+func TestLoadDSHConfigAndProviderIsolation(t *testing.T) {
+	values := baseValues(t)
+	values["AISUMMONER_AGENT_ADAPTER"] = AgentAdapterDSH
+	values["AISUMMONER_AGENT_BRIDGE_SECRET"] = strings.Repeat("d", minimumSecretSize)
+	values["AISUMMONER_OPENCODE_URL"] = "https://ignored.invalid"
+	values["AISUMMONER_OPENCODE_PASSWORD"] = "ignored-opencode-secret"
+	values["AISUMMONER_DEEPSEEK_URL"] = "http://ignored.invalid"
+	values["AISUMMONER_DEEPSEEK_API_KEY"] = "ignored\nprovider-secret"
+
+	configuration, err := load(mapLookup(values))
+	if err != nil {
+		t.Fatalf("load DSH config: %v", err)
+	}
+	if configuration.DSHURL != defaultDSHURL || configuration.DSHNodePath != defaultDSHNodePath ||
+		configuration.DSHCLIPath != defaultDSHCLIPath || configuration.DSHBridgeURL != defaultDSHBridgeURL ||
+		configuration.AgentBridgeListenAddr != defaultDSHBridgeAddr ||
+		configuration.DSHHome != filepath.Join(configuration.DataDir, defaultDSHHomeDir) {
+		t.Fatalf("unexpected DSH defaults: %#v", configuration)
+	}
+	if configuration.OpenCodeURL != "" || configuration.OpenCodePassword != "" || configuration.AgentWorkspaceRoot != "" ||
+		configuration.DeepSeekURL != "" || configuration.DeepSeekAPIKey != "" || configuration.DeepSeekModel != "" {
+		t.Fatalf("DSH mode retained another provider's configuration: %#v", configuration)
+	}
+}
+
+func TestLoadDSHConditionalRequirementsAndRedaction(t *testing.T) {
+	valid := dshValues(t)
+	secret := "dsh-bridge-secret-do-not-print-123456789"
+	valid["AISUMMONER_AGENT_BRIDGE_SECRET"] = secret
+	tests := []struct {
+		name   string
+		change func(map[string]string)
+	}{
+		{name: "host alias", change: func(values map[string]string) { values["AISUMMONER_DSH_URL"] = "http://localhost:14096" }},
+		{name: "host public", change: func(values map[string]string) { values["AISUMMONER_DSH_URL"] = "http://192.0.2.1:14096" }},
+		{name: "host path", change: func(values map[string]string) { values["AISUMMONER_DSH_URL"] = "http://127.0.0.1:14096/api" }},
+		{name: "host no port", change: func(values map[string]string) { values["AISUMMONER_DSH_URL"] = "http://127.0.0.1" }},
+		{name: "relative Node", change: func(values map[string]string) { values["AISUMMONER_DSH_NODE_PATH"] = "node" }},
+		{name: "relative CLI", change: func(values map[string]string) { values["AISUMMONER_DSH_CLI_PATH"] = "dsh.js" }},
+		{name: "root CLI", change: func(values map[string]string) { values["AISUMMONER_DSH_CLI_PATH"] = string(filepath.Separator) }},
+		{name: "root home", change: func(values map[string]string) { values["AISUMMONER_DSH_HOME"] = string(filepath.Separator) }},
+		{name: "public bridge", change: func(values map[string]string) { values["AISUMMONER_AGENT_BRIDGE_LISTEN_ADDR"] = "0.0.0.0:14097" }},
+		{name: "bridge alias", change: func(values map[string]string) {
+			values["AISUMMONER_DSH_BRIDGE_URL"] = "http://localhost:14097/internal/dsh/remote-exec"
+		}},
+		{name: "bridge wrong path", change: func(values map[string]string) {
+			values["AISUMMONER_DSH_BRIDGE_URL"] = "http://127.0.0.1:14097/internal/opencode/remote-exec"
+		}},
+		{name: "bridge query", change: func(values map[string]string) {
+			values["AISUMMONER_DSH_BRIDGE_URL"] = defaultDSHBridgeURL + "?secret=" + secret
+		}},
+		{name: "bridge mismatch", change: func(values map[string]string) { values["AISUMMONER_AGENT_BRIDGE_LISTEN_ADDR"] = "127.0.0.1:14100" }},
+		{name: "short secret", change: func(values map[string]string) { values["AISUMMONER_AGENT_BRIDGE_SECRET"] = "short" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			values := cloneValues(valid)
+			test.change(values)
+			_, err := load(mapLookup(values))
+			if err == nil {
+				t.Fatal("invalid DSH configuration was accepted")
+			}
+			for _, forbidden := range []string{secret, "localhost", "192.0.2.1"} {
+				if strings.Contains(err.Error(), forbidden) {
+					t.Fatalf("DSH configuration error exposed a rejected value: %q", err)
+				}
+			}
+		})
 	}
 }
 
@@ -304,6 +382,25 @@ func TestPreparePrivateDirectories(t *testing.T) {
 	}
 }
 
+func TestPreparePrivateDirectoriesIncludesDSHHome(t *testing.T) {
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "data")
+	dshHome := filepath.Join(root, "dsh-home")
+	configuration := Config{DataDir: dataDir, AgentAdapter: AgentAdapterDSH, DSHHome: dshHome}
+	if err := configuration.PreparePrivateDirectories(); err != nil {
+		t.Fatalf("prepare DSH directories: %v", err)
+	}
+	for _, path := range []string{dataDir, dshHome} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o700 {
+			t.Fatalf("%s mode=%#o, want 0700", path, info.Mode().Perm())
+		}
+	}
+}
+
 func TestPreparePrivateDirectoriesRejectsExactSymlink(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "target")
@@ -356,6 +453,19 @@ func openCodeValues(t *testing.T) map[string]string {
 	values["AISUMMONER_OPENCODE_BRIDGE_URL"] = defaultBridgeURL
 	values["AISUMMONER_AGENT_BRIDGE_LISTEN_ADDR"] = defaultBridgeListenAddr
 	values["AISUMMONER_AGENT_BRIDGE_SECRET"] = strings.Repeat("b", minimumSecretSize)
+	return values
+}
+
+func dshValues(t *testing.T) map[string]string {
+	t.Helper()
+	values := baseValues(t)
+	values["AISUMMONER_AGENT_ADAPTER"] = AgentAdapterDSH
+	values["AISUMMONER_DSH_URL"] = defaultDSHURL
+	values["AISUMMONER_DSH_NODE_PATH"] = defaultDSHNodePath
+	values["AISUMMONER_DSH_CLI_PATH"] = defaultDSHCLIPath
+	values["AISUMMONER_DSH_BRIDGE_URL"] = defaultDSHBridgeURL
+	values["AISUMMONER_AGENT_BRIDGE_LISTEN_ADDR"] = defaultDSHBridgeAddr
+	values["AISUMMONER_AGENT_BRIDGE_SECRET"] = strings.Repeat("d", minimumSecretSize)
 	return values
 }
 

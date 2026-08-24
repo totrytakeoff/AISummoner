@@ -9,18 +9,18 @@ review_required: true
 
 ## Current Shape
 
-The current tree is a proved MVP vertical slice, not a mature two-client
-product. The Go Server is the authoritative control plane and the Go Remote
-Client supplies outbound Tunnel/SSH execution. The Browser has separate
-Device, Terminal and Agent pages. Agent sessions, approvals and ordered events
-are already Server-owned; Fake, OpenCode and direct DeepSeek use the same
+The current tree is a proved MVP vertical slice moving into Alpha. The Go
+Server is the authoritative control plane and the Go Remote Client supplies
+outbound Tunnel/SSH execution. The Browser now has one DSH-first Device
+Workspace with Session, Agent and optional tool zones; old Device, Terminal and
+Agent paths are migration redirects. Agent sessions, approvals and ordered
+events remain Server-owned; Fake, OpenCode and direct DeepSeek use the same
 Remote execution boundary.
 
 The strongest reusable assets are the trust chain, owner-scoped persistence,
-Tunnel/SSH lifecycle and Terminal data plane. The primary debt is above that
-line: fragmented Controller information architecture, a minimal one-Turn
-Adapter interface, incomplete Runtime capabilities, and a CLI-only Remote user
-experience.
+Tunnel/SSH lifecycle, Terminal data plane, Qt Remote GUI and the source-aligned
+DSH presentation baseline. The primary debt is now the minimal one-Turn Adapter
+interface and incomplete Runtime capabilities rather than Controller chrome.
 
 ## Alpha Target Shape
 
@@ -64,8 +64,9 @@ Remote Core Daemon
 - Use an ordered normalized Session Log to drive every Runtime through one UI.
 - Split Agent integration into Runtime Adapter, Capability Descriptor, Remote
   Capability Bridge, and Provider/Tool presentation.
-- Use DSH as the first rich interaction/runtime reference without importing its
-  Host, database, credentials or local execution authority.
+- Use the pinned DSH Web UX as the canonical Controller experience and first
+  rich Runtime reference without importing its Host, database, credentials or
+  local execution authority.
 - Implement rich Runtime support in order DSH→OpenCode→Codex→Claude Code;
   retain direct DeepSeek as a lightweight model API Adapter.
 - Prefer official machine interfaces: Codex App Server over TUI scraping and
@@ -113,9 +114,10 @@ the daemon. GUI exit and daemon disconnect are distinct state transitions.
 1. Split Remote CLI internals into a daemon controller and private IPC, then
    add the Qt 6 Widgets GUI/AppImage while retaining headless mode.
 2. Add the Controller workspace shell and bounded Session index while embedding
-   the current Agent/Terminal behavior as reusable surfaces.
-3. Introduce event v2/capabilities behind translation from existing events;
-   migrate the UI to DSH-like nodes and add the DSH Adapter.
+   the current Agent/Terminal behavior as reusable surfaces. **Completed.**
+3. Establish the source-aligned DSH presentation/Settings baseline, then
+   introduce event v2/capabilities behind translation from existing events and
+   add the real DSH Runtime Adapter. **Presentation baseline completed.**
 4. Enrich OpenCode, then add Codex and Claude using the same contracts.
 5. Add structured file/diff and Desktop capabilities only through separate ADRs.
 

@@ -56,6 +56,16 @@ export const initialAgentViewState: AgentViewState = {
   timeline: [],
 }
 
+const turnFailureMessages: Record<string, string> = {
+  COMMAND_DENIED: '命令已被拒绝。',
+  DEVICE_OFFLINE: '设备当前离线。',
+  REMOTE_EXEC_CANCELED: '远程命令已取消。',
+  REMOTE_EXEC_TIMEOUT: '远程命令执行超时。',
+  REMOTE_EXEC_TRANSPORT: '远程命令通道异常。',
+  APPROVAL_TIMEOUT: '命令审批已超时。',
+  credential_required: '尚未配置 DeepSeek API 密钥，请先在设置中完成配置。',
+}
+
 function objectValue(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
 }
@@ -330,12 +340,16 @@ export function projectAgentEvent(state: AgentViewState, event: ParsedAgentEvent
     case 'turn.completed':
       return { ...state, turnState: 'completed', timeline: settleAllReasoning(state.timeline), failure: undefined, failureCode: undefined }
     case 'turn.failed':
+      {
+        const failureCode = stringValue(payload, 'code')
+        const message = failureCode ? turnFailureMessages[failureCode] : undefined
       return {
         ...state,
         turnState: 'failed',
         timeline: settleAllReasoning(state.timeline),
-        failure: stringValue(payload, 'message', 'error', 'reason') ?? 'The Agent turn failed.',
-        failureCode: stringValue(payload, 'code'),
+        failure: message ?? 'Agent 本轮执行失败。',
+        failureCode,
+      }
       }
   }
 }
@@ -398,11 +412,12 @@ function snapshotTurnState(state: string): AgentViewState['turnState'] {
 }
 
 export function projectAgentSnapshot(snapshot: AgentSnapshot): AgentViewState {
-  const ordered: Array<{ createdAt: string; order: number; item: AgentTimelineItem }> = []
+  const ordered: Array<{ createdAt: string; priority: number; order: number; item: AgentTimelineItem }> = []
   snapshot.messages.forEach((message, order) => {
     if (message.role === 'reasoning') {
       ordered.push({
         createdAt: message.created_at,
+        priority: 1,
         order,
         item: {
           kind: 'reasoning',
@@ -414,6 +429,7 @@ export function projectAgentSnapshot(snapshot: AgentSnapshot): AgentViewState {
     }
     ordered.push({
       createdAt: message.created_at,
+      priority: message.role === 'user' ? 0 : 3,
       order,
       item: {
         kind: 'message',
@@ -425,18 +441,20 @@ export function projectAgentSnapshot(snapshot: AgentSnapshot): AgentViewState {
   snapshot.tool_calls.forEach((tool, order) => {
     ordered.push({
       createdAt: tool.created_at,
+      priority: 2,
       order: snapshot.messages.length + order,
       item: { kind: 'tool', key: `tool:${tool.id}`, tool: snapshotTool(tool) },
     })
   })
-  ordered.sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.order - right.order)
+  ordered.sort((left, right) => left.createdAt.localeCompare(right.createdAt) ||
+    left.priority - right.priority || left.order - right.order)
   const failed = snapshot.session.state === 'failed'
   return {
     sessionState: snapshot.session.state,
     turnState: snapshotTurnState(snapshot.session.state),
     timeline: ordered.map((entry) => entry.item),
     ...(failed ? {
-      failure: 'The previous Agent turn failed. Retry here or start a new conversation.',
+      failure: '上一轮 Agent 执行失败。可在此重试，或新建会话。',
     } : {}),
   }
 }

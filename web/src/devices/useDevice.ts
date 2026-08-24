@@ -10,7 +10,7 @@ interface DeviceSnapshot {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof APIError ? error.message : 'Could not load the device.'
+  return error instanceof APIError ? error.message : '无法加载设备。'
 }
 
 export function useDevice(deviceID: string | undefined, poll = true) {
@@ -26,7 +26,7 @@ export function useDevice(deviceID: string | undefined, poll = true) {
     const requestedDeviceID = deviceID
     const requestID = ++requestSequence.current
     if (!requestedDeviceID) {
-      setSnapshot({ deviceID: requestedDeviceID, device: null, loading: false, error: 'Device ID is missing.' })
+      setSnapshot({ deviceID: requestedDeviceID, device: null, loading: false, error: '缺少设备 ID。' })
       return
     }
     try {

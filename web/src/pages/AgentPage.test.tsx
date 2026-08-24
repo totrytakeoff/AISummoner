@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Link, Route, Routes } from 'react-router-dom'
 import type { ReactNode } from 'react'
@@ -85,71 +85,16 @@ describe('Agent page lifecycle and approval boundaries', () => {
       } }))
     renderAgent()
 
-    expect(await screen.findAllByText('DeepSeek')).toHaveLength(2)
-    expect(screen.getByText('Confirm commands')).toBeInTheDocument()
+    expect(await screen.findByText('DeepSeek', { selector: '.session-chip.provider' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /DeepSeek/ })).toBeInTheDocument()
+    expect(screen.queryByText('DSH 体验层')).not.toBeInTheDocument()
+    expect(screen.getByText('逐条确认命令')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Start Agent session' })).not.toBeInTheDocument()
     expect(screen.queryByRole('radio')).not.toBeInTheDocument()
+    await latestEventSource()
     expect(fetchMock).toHaveBeenLastCalledWith('/api/v1/devices/dev_online/agent-sessions', expect.objectContaining({
-      method: 'POST', body: JSON.stringify({ approval_mode: 'per_command' }),
+      method: 'POST', body: JSON.stringify({}),
     }))
-  })
-
-  it('configures DeepSeek from a transient password form and starts a new bound conversation', async () => {
-    const user = userEvent.setup()
-    const storageWrite = vi.spyOn(Storage.prototype, 'setItem')
-    const secret = 'sk-browser-only-secret-sentinel'
-    const fetchMock = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(jsonResponse({ device: onlineDevice }))
-      .mockResolvedValueOnce(jsonResponse(agentSnapshot()))
-      .mockResolvedValueOnce(emptyResponse())
-      .mockResolvedValueOnce(jsonResponse({ session: {
-        id: 'ags_deepseek_new', device_id: onlineDevice.id, approval_mode: 'per_command', provider: 'deepseek', state: 'idle',
-      } }))
-    renderAgent()
-
-    await user.click(await screen.findByRole('button', { name: 'Set up DeepSeek' }))
-    const dialog = screen.getByRole('dialog', { name: 'Set up DeepSeek' })
-    const keyInput = screen.getByLabelText('DeepSeek API key')
-    expect(keyInput).toHaveAttribute('type', 'password')
-    expect(keyInput).toHaveAttribute('autocomplete', 'off')
-    await user.type(keyInput, secret)
-    await user.click(screen.getByRole('button', { name: 'Use DeepSeek' }))
-
-    await waitFor(() => expect(dialog).not.toBeInTheDocument())
-    expect(screen.getByText(/DeepSeek is ready\. This new conversation/)).toBeInTheDocument()
-    const configuration = fetchMock.mock.calls.find(([url]) => url === '/api/v1/agent-provider/deepseek')
-    expect(configuration?.[1]).toMatchObject({
-      method: 'POST', body: JSON.stringify({ api_key: secret, model: 'deepseek-v4-flash' }),
-    })
-    const created = fetchMock.mock.calls.find(([url, init]) => url === '/api/v1/devices/dev_online/agent-sessions' && init?.method === 'POST')
-    expect(created?.[1]).toMatchObject({ method: 'POST', body: JSON.stringify({ approval_mode: 'per_command' }) })
-    expect(await screen.findAllByText('DeepSeek')).toHaveLength(2)
-    expect(document.body).not.toHaveTextContent(secret)
-    expect(storageWrite).not.toHaveBeenCalled()
-  })
-
-  it('keeps a rejected DeepSeek key masked for retry and clears it when canceled', async () => {
-    const user = userEvent.setup()
-    const secret = 'sk-retry-secret-sentinel'
-    const fetchMock = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(jsonResponse({ device: onlineDevice }))
-      .mockResolvedValueOnce(jsonResponse(agentSnapshot()))
-      .mockResolvedValueOnce(jsonResponse({ error: { code: 'INVALID_REQUEST', message: 'invalid request' } }, 400))
-    renderAgent()
-
-    await user.click(await screen.findByRole('button', { name: 'Set up DeepSeek' }))
-    const keyInput = screen.getByLabelText('DeepSeek API key')
-    await user.type(keyInput, secret)
-    await user.click(screen.getByRole('button', { name: 'Use DeepSeek' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('invalid request')
-    expect(keyInput).toHaveValue(secret)
-    expect(keyInput).toHaveAttribute('type', 'password')
-    expect(fetchMock).toHaveBeenCalledTimes(3)
-
-    await user.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(screen.queryByRole('dialog', { name: 'Set up DeepSeek' })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Set up DeepSeek' }))
-    expect(screen.getByLabelText('DeepSeek API key')).toHaveValue('')
   })
 
   it('waits without a mode prompt or session mutation while the device is offline', async () => {
@@ -158,7 +103,7 @@ describe('Agent page lifecycle and approval boundaries', () => {
       .mockResolvedValueOnce(noLatestSession())
     renderAgent('/devices/dev_offline/agent')
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('start automatically when it reconnects')
+    expect(await screen.findByRole('alert')).toHaveTextContent('重新连接后将自动创建会话')
     expect(screen.queryByRole('radio')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Start Agent session' })).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(2)
@@ -177,9 +122,9 @@ describe('Agent page lifecycle and approval boundaries', () => {
       } })))
     renderAgent()
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('could not start yet')
-    await user.click(screen.getByRole('button', { name: 'Try again' }))
-    expect(await screen.findByLabelText('Message the Agent')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('服务暂时不可用，请稍后重试。')
+    await user.click(screen.getByRole('button', { name: '重试' }))
+    expect(await screen.findByLabelText('向 Agent 发送消息')).toBeInTheDocument()
 
     const sessionRequests = fetchMock.mock.calls.filter(([url]) => url === '/api/v1/devices/dev_online/agent-sessions')
     expect(sessionRequests.map(([, init]) => init?.method ?? 'GET')).toEqual(['GET', 'POST', 'GET'])
@@ -197,11 +142,11 @@ describe('Agent page lifecycle and approval boundaries', () => {
       .mockImplementationOnce(() => postResponse.promise)
     renderAgent()
 
-    const prompt = await screen.findByLabelText('Message the Agent')
-    const send = screen.getByRole('button', { name: 'Send' })
+    const prompt = await screen.findByLabelText('向 Agent 发送消息')
+    const send = screen.getByRole('button', { name: '发送' })
     expect(prompt).toBeDisabled()
     expect(send).toBeDisabled()
-    expect(screen.getByRole('status')).toHaveTextContent('Connecting Agent event stream')
+    expect(screen.getByRole('status')).toHaveTextContent('正在连接 Agent 事件流')
 
     const source = await latestEventSource()
     act(() => source.open())
@@ -222,7 +167,7 @@ describe('Agent page lifecycle and approval boundaries', () => {
 
     await act(async () => postResponse.resolve(emptyResponse()))
     await waitFor(() => expect(prompt).toBeEnabled())
-    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
     const messages = Array.from(document.querySelectorAll<HTMLElement>('.chat-message'))
     expect(messages.map((message) => message.textContent)).toEqual([
       expect.stringContaining('Inspect this host'),
@@ -241,8 +186,8 @@ describe('Agent page lifecycle and approval boundaries', () => {
       .mockResolvedValueOnce(emptyResponse())
     renderAgent()
 
-    expect(await screen.findByText('Test adapter')).toBeInTheDocument()
-    expect(screen.getByText(/does not understand natural-language tasks/)).toBeInTheDocument()
+    expect(await screen.findByText('测试适配器', { selector: '.session-chip.provider' })).toBeInTheDocument()
+    expect(screen.getByText(/不理解自然语言任务/)).toBeInTheDocument()
 
     const source = await latestEventSource()
     act(() => {
@@ -253,16 +198,16 @@ describe('Agent page lifecycle and approval boundaries', () => {
       })
     })
 
-    const conversation = screen.getByLabelText('Agent conversation')
+    const conversation = screen.getByLabelText('Agent 对话')
     expect(conversation.textContent?.indexOf('I will inspect it.')).toBeLessThan(conversation.textContent?.indexOf('hostname') ?? -1)
-    expect(screen.getByLabelText('Command approval')).toHaveTextContent('hostname')
-    expect(screen.queryByLabelText('Message the Agent')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('命令审批')).toHaveTextContent('hostname')
+    expect(screen.queryByLabelText('向 Agent 发送消息')).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Approve session' }))
-    expect(screen.getByRole('alertdialog', { name: 'Approve commands for this conversation?' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '允许当前会话' }))
+    expect(screen.getByRole('alertdialog', { name: '允许当前会话后续执行命令？' })).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(3)
-    await user.click(screen.getByRole('button', { name: 'Approve this conversation' }))
-    expect(await screen.findByText('Full Access · this session')).toBeInTheDocument()
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '允许当前会话' }))
+    expect(await screen.findByText('完全访问 · 仅当前会话')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenLastCalledWith('/api/v1/tool-calls/tool_fake/decision', expect.objectContaining({
       method: 'POST', body: JSON.stringify({ decision: 'approve_session' }),
     }))
@@ -281,13 +226,13 @@ describe('Agent page lifecycle and approval boundaries', () => {
       }, 409))
     renderAgent()
 
-    const prompt = await screen.findByLabelText('Message the Agent')
+    const prompt = await screen.findByLabelText('向 Agent 发送消息')
     const source = await latestEventSource()
     act(() => source.open())
     await user.type(prompt, 'Do not lose this prompt')
-    await user.click(screen.getByRole('button', { name: 'Send' }))
+    await user.click(screen.getByRole('button', { name: '发送' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('another turn is already running')
+    expect(await screen.findByRole('alert')).toHaveTextContent('当前对话正在处理中，请稍候。')
     expect(prompt).toHaveValue('Do not lose this prompt')
     expect(prompt).toBeEnabled()
     expect(document.querySelector('.chat-message.user')).not.toBeInTheDocument()
@@ -320,21 +265,21 @@ describe('Agent page lifecycle and approval boundaries', () => {
     })
     renderAgent('/devices/dev_a/agent', <Link to="/devices/dev_b/agent">Switch to device B</Link>)
 
-    expect(await screen.findByText('Full Access · this session')).toBeInTheDocument()
+    expect(await screen.findByText('完全访问 · 仅当前会话')).toBeInTheDocument()
     const sourceA = await latestEventSource()
 
     await user.click(screen.getByRole('link', { name: 'Switch to device B' }))
     expect(await screen.findByRole('link', { name: '← device-b' })).toBeInTheDocument()
-    expect(screen.queryByText('Full Access · this session')).not.toBeInTheDocument()
+    expect(screen.queryByText('完全访问 · 仅当前会话')).not.toBeInTheDocument()
     expect(screen.queryByLabelText(/Confirm every command/)).not.toBeInTheDocument()
     expect(sourceA.close).toHaveBeenCalledOnce()
 
-    await user.click(screen.getByRole('button', { name: 'New conversation' }))
+    await user.click(screen.getByRole('button', { name: '新建会话' }))
     await waitFor(() => {
       const createB = fetchMock.mock.calls.find(([url, init]) => url === '/api/v1/devices/dev_b/agent-sessions' && init?.method === 'POST')
-      expect(createB?.[1]).toMatchObject({ method: 'POST', body: JSON.stringify({ approval_mode: 'per_command' }) })
+      expect(createB?.[1]).toMatchObject({ method: 'POST', body: JSON.stringify({}) })
     })
-    expect(screen.getByText('Confirm commands')).toBeInTheDocument()
+    expect(screen.getByText('逐条确认命令')).toBeInTheDocument()
     expect(screen.queryByRole('radio')).not.toBeInTheDocument()
   })
 
@@ -361,10 +306,77 @@ describe('Agent page lifecycle and approval boundaries', () => {
     expect(await screen.findByText('The host is ready.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Start Agent session' })).not.toBeInTheDocument()
     expect(screen.getByText('hostname')).toBeInTheDocument()
-    const reasoning = screen.getByText('Think').closest('details')
+    const reasoning = screen.getByText('思考过程').closest('details')
     expect(reasoning).not.toHaveAttribute('open')
-    await user.click(screen.getByText('Think'))
+    await user.click(screen.getByText('思考过程'))
     expect(reasoning).toHaveAttribute('open')
     expect(screen.getByText('I should inspect hostname.')).toBeInTheDocument()
+  })
+
+  it('shows missing DSH credentials directly and resumes the same failed conversation after configuration', async () => {
+    const user = userEvent.setup()
+    let configured = false
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = String(input)
+      if (url === '/api/v1/devices/dev_online') return Promise.resolve(jsonResponse({ device: onlineDevice }))
+      if (url === '/api/v1/devices/dev_online/agent-sessions' && (init?.method ?? 'GET') === 'GET') {
+        return Promise.resolve(jsonResponse(agentSnapshot({ session: {
+          id: 'ags_missing_key', device_id: onlineDevice.id, approval_mode: 'per_command', provider: 'dsh', state: 'failed',
+        } })))
+      }
+      if (url === '/api/v1/agent-provider/dsh') {
+        return Promise.resolve(jsonResponse({ credential: { configured, writable: true } }))
+      }
+      if (url === '/api/v1/agent-sessions/ags_missing_key/messages' && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({ message: { id: 'msg_retry' } }, 202))
+      }
+      return Promise.reject(new Error(`unexpected fetch ${url} ${init?.method ?? 'GET'}`))
+    })
+    renderAgent()
+
+    expect(await screen.findByText('尚未配置 DeepSeek API 密钥')).toBeInTheDocument()
+    expect(screen.queryByText('上一轮 Agent 执行失败')).not.toBeInTheDocument()
+    const prompt = screen.getByLabelText('向 Agent 发送消息')
+    const source = await latestEventSource()
+    act(() => source.open())
+    expect(prompt).toBeDisabled()
+
+    configured = true
+    act(() => window.dispatchEvent(new Event('aisummoner:dsh-credential-changed')))
+    await waitFor(() => expect(prompt).toBeEnabled())
+    expect(screen.queryByText('上一轮 Agent 执行失败')).not.toBeInTheDocument()
+    await user.type(prompt, '继续原来的任务')
+    await user.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/agent-sessions/ags_missing_key/messages',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ content: '继续原来的任务' }) }),
+    ))
+    expect(fetchMock.mock.calls.filter(([url, init]) =>
+      url === '/api/v1/devices/dev_online/agent-sessions' && init?.method === 'POST')).toHaveLength(0)
+  })
+
+  it('edits the authoritative current-session permission with a Full Access risk confirmation', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(jsonResponse({ device: onlineDevice }))
+      .mockResolvedValueOnce(jsonResponse(agentSnapshot({ session: {
+        id: 'ags_permission', device_id: onlineDevice.id, approval_mode: 'per_command', provider: 'opencode', state: 'idle',
+      } })))
+      .mockResolvedValueOnce(jsonResponse({ session: {
+        id: 'ags_permission', device_id: onlineDevice.id, approval_mode: 'full_access', provider: 'opencode', state: 'idle',
+      } }))
+    renderAgent()
+
+    const permission = await screen.findByRole('button', { name: '执行命令前询问' })
+    await user.click(permission)
+    await user.click(screen.getByRole('menuitemradio', { name: /完全访问/ }))
+    expect(screen.getByRole('alertdialog', { name: '允许本会话完全访问被控设备？' })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '启用完全访问' }))
+
+    expect(await screen.findByRole('button', { name: '完全访问' })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/v1/agent-sessions/ags_permission', expect.objectContaining({
+      method: 'PATCH', body: JSON.stringify({ approval_mode: 'full_access' }),
+    }))
   })
 })

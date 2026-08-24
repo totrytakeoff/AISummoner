@@ -22,39 +22,39 @@ export function ToolApprovalPanel({ tool, onDecision }: ToolApprovalPanelProps) 
       setConfirmSessionAccess(false)
       onDecision(tool.id, decision)
     } catch (nextError) {
-      setError(nextError instanceof APIError ? nextError.message : 'Could not send this decision. Try again.')
+      setError(nextError instanceof APIError ? nextError.message : '无法提交审批结果，请重试。')
       setDeciding(null)
     }
   }
 
   return (
-    <section className="tool-approval-panel" aria-label="Command approval">
+    <section className="tool-approval-panel" aria-label="命令审批">
       <div className="tool-approval-copy">
-        <span className="eyebrow">Approval required</span>
-        <strong>Allow this command on the remote device?</strong>
+        <span className="eyebrow">需要审批</span>
+        <strong>允许在被控设备上执行这条命令吗？</strong>
         <code>{tool.command}</code>
       </div>
       <div className="approval-actions">
-        <button className="button primary small" type="button" disabled={deciding !== null} onClick={() => void decide('approve_once')}>Approve once</button>
+        <button className="button primary small" type="button" disabled={deciding !== null} onClick={() => void decide('approve_once')}>仅允许本次</button>
         <button className="button secondary small" type="button" disabled={deciding !== null} onClick={() => {
           setError(null)
           setConfirmSessionAccess(true)
-        }}>Approve session</button>
-        <button className="button danger small" type="button" disabled={deciding !== null} onClick={() => void decide('deny')}>Deny</button>
+        }}>允许当前会话</button>
+        <button className="button danger small" type="button" disabled={deciding !== null} onClick={() => void decide('deny')}>拒绝</button>
       </div>
       {error && !confirmSessionAccess && <div className="notice error compact" role="alert">{error}</div>}
       {confirmSessionAccess && (
         <ConfirmDialog
-          eyebrow="Elevated Agent access"
-          title="Approve commands for this conversation?"
+          eyebrow="提升 Agent 权限"
+          title="允许当前会话后续执行命令？"
           description={(
             <>
-              <p>Future commands in this Agent conversation will run without asking again. This permission ends when you start a new conversation.</p>
+              <p>当前 Agent 会话后续的命令将不再逐条询问。新建会话后该权限自动失效。</p>
               {error && <div className="notice error compact" role="alert">{error}</div>}
             </>
           )}
-          confirmLabel="Approve this conversation"
-          busyLabel="Approving…"
+          confirmLabel="允许当前会话"
+          busyLabel="正在批准…"
           busy={deciding === 'approve_session'}
           onCancel={() => {
             setConfirmSessionAccess(false)

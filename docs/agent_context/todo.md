@@ -8,6 +8,30 @@ updated_by: planner
 
 ## Current
 
+- [x] task021: align current/default Session permissions with enforced Remote
+  policy, add value-free DSH credential readiness and same-Session recovery,
+  repair replay ordering/collapse-all, add archive/delete management, and expose
+  global Settings from the Device Hub. Revision 1 also prevents five-second
+  Device polling from resetting the selected Settings tab. Implementation,
+  low-memory Go/Web gates and bounded ASD deployment are complete; the human
+  tester accepted this as the first usable Controller milestone. Independent
+  code review remains release debt.
+
+- [x] task020: the human tester proved the real DSH Agent -> approved Remote
+  command -> SSH -> Device chain. Follow-up usability defects are isolated in
+  Task021 rather than weakening the accepted runtime/security boundary.
+
+- [x] task019: replace the duplicate Device/Terminal toolbar actions with one
+  component-dock launcher and localize the complete Controller UI into Chinese.
+
+- [x] task018: DSH-first Controller rebaseline — retire old Manage, move Device
+  and Agent configuration into Workspace Settings, port the pinned DSH visual
+  and interaction system, and retain explicit Runtime adapter seams. Web
+  66/66, production build and desktop/narrow visual smoke pass; awaiting the
+  user's visual acceptance without a fabricated independent review.
+- [x] The user accepted Task018's restored DSH visual baseline and authorized
+  this two-finding cleanup before real DSH Runtime integration.
+
 - [x] MVP-0 real Terminal/Agent chain accepted by the user.
 - [x] Alpha direction and ADR-0004 created without weakening the data plane.
 - [x] User selected Remote Client as the first refactor and Qt as the GUI
@@ -20,13 +44,30 @@ updated_by: planner
 - [x] task016 revision 1 removes mandatory first-run Server entry, embeds a
   build-time default, automatically starts the daemon, keeps self-hosting under
   an advanced override, and has been rebuilt/reverified as `ready_for_review`.
+- [x] Human accepted the zero-configuration Remote GUI direction and explicitly
+  authorized starting the Controller refactor while the combined review remains
+  tracked as release debt.
+- [x] task017 scope frozen: bounded Session index plus Device Hub → fixed
+  three-zone Control Workspace; Agent protocol/runtime v2 stays in Alpha A4.
+- [x] task017 revision 1 implementation and verification frozen as
+  `ready_for_review`: bounded owner-scoped Session index, unified Workspace,
+  complete <=1139 px fallback, inert/focus semantics, single Session creator,
+  non-destructive errors and the required transport/ownership regressions.
+- [x] task017 revision 2: close the maximum-width 1140–1259 px dock boundary,
+  per-Device A→B→A creation admission and narrow Session-action focus findings.
 
 ## Next
+
+- [ ] Independently review Task021; the deployed Controller milestone has
+  already received human product acceptance.
 
 - [ ] Independent combined Task015/Task016 review; no approval is inferred from
   the bounded external reviewer timeout.
 - [ ] Non-root Ubuntu real pairing/status/session/pause/resume/GUI-close E2E.
-- [ ] Resume Controller Workspace as Alpha A3 only after Remote GUI approval.
+- [x] Task017 Controller Workspace Foundation revision 2 independently reviewed
+  and approved with the revision 0/1 history preserved.
+- [x] Human accepted the Task019 UI correction and authorized the real DSH
+  Runtime integration as the next slice.
 
 ## Required Task015 Boundaries
 

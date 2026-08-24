@@ -15,6 +15,7 @@ type sessionJSON struct {
 	State             string  `json:"state"`
 	CreatedAt         string  `json:"created_at"`
 	UpdatedAt         string  `json:"updated_at"`
+	ArchivedAt        *string `json:"archived_at"`
 }
 
 func sessionResponse(session store.AgentSession) sessionJSON {
@@ -22,7 +23,41 @@ func sessionResponse(session store.AgentSession) sessionJSON {
 		ID: session.ID, DeviceID: session.DeviceID, ApprovalMode: session.ApprovalMode,
 		Provider: session.Provider, ExternalSessionID: session.ExternalSessionID, State: session.State,
 		CreatedAt: session.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: session.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		ArchivedAt: formatOptionalTime(session.ArchivedAt),
 	}
+}
+
+type sessionSummaryJSON struct {
+	ID           string  `json:"id"`
+	DeviceID     string  `json:"device_id"`
+	DeviceName   string  `json:"device_name"`
+	ApprovalMode string  `json:"approval_mode"`
+	Provider     string  `json:"provider"`
+	State        string  `json:"state"`
+	Title        string  `json:"title"`
+	CreatedAt    string  `json:"created_at"`
+	UpdatedAt    string  `json:"updated_at"`
+	ArchivedAt   *string `json:"archived_at"`
+}
+
+func sessionSummaryResponse(summary store.AgentSessionSummary) sessionSummaryJSON {
+	return sessionSummaryJSON{
+		ID: summary.ID, DeviceID: summary.DeviceID, DeviceName: summary.DeviceName,
+		ApprovalMode: summary.ApprovalMode, Provider: summary.Provider,
+		State: summary.State, Title: summary.Title,
+		CreatedAt:  summary.CreatedAt.UTC().Format(time.RFC3339Nano),
+		UpdatedAt:  summary.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		ArchivedAt: formatOptionalTime(summary.ArchivedAt),
+	}
+}
+
+type settingsJSON struct {
+	DefaultApprovalMode string  `json:"default_approval_mode"`
+	UpdatedAt           *string `json:"updated_at"`
+}
+
+func settingsResponse(settings store.AgentSettings) settingsJSON {
+	return settingsJSON{DefaultApprovalMode: settings.DefaultApprovalMode, UpdatedAt: formatOptionalTime(settings.UpdatedAt)}
 }
 
 type messageJSON struct {

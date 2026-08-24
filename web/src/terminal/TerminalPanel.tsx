@@ -23,10 +23,10 @@ export function TerminalPanel({ deviceID }: { deviceID: string }) {
   }, [deviceID])
 
   return (
-    <section className="terminal-frame" aria-label="Remote terminal">
+    <section className="terminal-frame" aria-label="远程终端">
       <div className="terminal-toolbar">
         <span className={`connection-indicator ${state}`} aria-hidden="true" />
-        <span className="mono">{state === 'connected' ? 'Connected' : state}</span>
+        <span className="mono">{{ connecting: '连接中', connected: '已连接', closed: '已关闭', error: '错误' }[state]}</span>
         {detail && <span className="terminal-detail" role={state === 'error' ? 'alert' : 'status'}>{detail}</span>}
       </div>
       <div className="terminal-container" ref={containerRef} />

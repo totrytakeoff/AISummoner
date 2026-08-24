@@ -74,7 +74,7 @@ export function useAuth(): AuthContextValue {
 export function RequireAuth({ children }: { children: ReactNode }) {
   const auth = useAuth()
   const location = useLocation()
-  if (auth.status === 'loading') return <main className="centered-state">Checking your session…</main>
+  if (auth.status === 'loading') return <main className="centered-state">正在检查登录状态…</main>
   if (auth.status === 'anonymous') {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />
   }
@@ -83,7 +83,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
 
 export function PublicOnly({ children }: { children: ReactNode }) {
   const auth = useAuth()
-  if (auth.status === 'loading') return <main className="centered-state">Checking your session…</main>
+  if (auth.status === 'loading') return <main className="centered-state">正在检查登录状态…</main>
   if (auth.status === 'authenticated') return <Navigate to="/devices" replace />
   return <>{children}</>
 }

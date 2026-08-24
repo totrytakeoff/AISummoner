@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { emptyResponse, jsonResponse, renderWithRouter } from '../test/helpers'
 import type { ToolDecision } from '../api/types'
@@ -20,16 +20,30 @@ describe('Agent tool presentation and approval', () => {
 
     expect(screen.getByText('uname -a')).toBeInTheDocument()
     expect(screen.queryByText('Linux host')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Approve once' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '仅允许本次' })).not.toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', { name: /Run command/ }))
+    await userEvent.click(screen.getByRole('button', { name: /运行命令/ }))
     expect(screen.getByText('Linux host')).toBeInTheDocument()
-    expect(screen.getByText(/Exit code:/)).toHaveTextContent('0')
+    expect(screen.getByText(/退出码：/)).toHaveTextContent('0')
+  })
+
+  it('collapses every expanded command card when the shared collapse signal changes', async () => {
+    const first = { ...pendingTool, id: 'tool_first', status: 'completed', output: 'first output', exitCode: 0 }
+    const second = { ...pendingTool, id: 'tool_second', command: 'hostname', status: 'completed', output: 'second output', exitCode: 0 }
+    const view = renderWithRouter(<><ToolCallCard tool={first} collapseSignal={0} /><ToolCallCard tool={second} collapseSignal={0} /></>)
+
+    for (const trigger of screen.getAllByRole('button', { name: /运行命令/ })) await userEvent.click(trigger)
+    expect(screen.getByText('first output')).toBeInTheDocument()
+    expect(screen.getByText('second output')).toBeInTheDocument()
+
+    view.rerender(<><ToolCallCard tool={first} collapseSignal={1} /><ToolCallCard tool={second} collapseSignal={1} /></>)
+    expect(screen.queryByText('first output')).not.toBeInTheDocument()
+    expect(screen.queryByText('second output')).not.toBeInTheDocument()
   })
 
   it.each<[string, ToolDecision]>([
-    ['Approve once', 'approve_once'],
-    ['Deny', 'deny'],
+    ['仅允许本次', 'approve_once'],
+    ['拒绝', 'deny'],
   ])('posts %s from the composer approval takeover', async (label, decision) => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(emptyResponse())
     const onDecision = vi.fn()
@@ -48,10 +62,10 @@ describe('Agent tool presentation and approval', () => {
     const onDecision = vi.fn()
     renderWithRouter(<ToolApprovalPanel tool={pendingTool} onDecision={onDecision} />)
 
-    const trigger = screen.getByRole('button', { name: 'Approve session' })
+    const trigger = screen.getByRole('button', { name: '允许当前会话' })
     await user.click(trigger)
-    expect(screen.getByRole('alertdialog', { name: 'Approve commands for this conversation?' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus()
+    expect(screen.getByRole('alertdialog', { name: '允许当前会话后续执行命令？' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '取消' })).toHaveFocus()
     expect(fetchMock).not.toHaveBeenCalled()
 
     await user.keyboard('{Escape}')
@@ -59,7 +73,7 @@ describe('Agent tool presentation and approval', () => {
     expect(trigger).toHaveFocus()
 
     await user.click(trigger)
-    await user.click(screen.getByRole('button', { name: 'Approve this conversation' }))
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '允许当前会话' }))
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/tool-calls/tool_1/decision', expect.objectContaining({
       method: 'POST', body: JSON.stringify({ decision: 'approve_session' }),
     }))
@@ -76,14 +90,14 @@ describe('Agent tool presentation and approval', () => {
     const onDecision = vi.fn()
     renderWithRouter(<ToolApprovalPanel tool={pendingTool} onDecision={onDecision} />)
 
-    await user.click(screen.getByRole('button', { name: 'Approve once' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('decision could not be recorded yet')
-    expect(screen.getByRole('button', { name: 'Approve once' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: 'Approve session' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: 'Deny' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: '仅允许本次' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('请求未能完成，请检查后重试。')
+    expect(screen.getByRole('button', { name: '仅允许本次' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '允许当前会话' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '拒绝' })).toBeEnabled()
     expect(onDecision).not.toHaveBeenCalled()
 
-    await user.click(screen.getByRole('button', { name: 'Approve once' }))
+    await user.click(screen.getByRole('button', { name: '仅允许本次' }))
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(onDecision).toHaveBeenCalledWith('tool_1', 'approve_once')
   })

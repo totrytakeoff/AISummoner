@@ -33,23 +33,28 @@ updated_by: planner
 
 ## Alpha A2: Qt Remote Desktop Client
 
-- [ ] task016: Qt 6 Widgets status/events/settings application.
-- [ ] Pairing code/countdown/copy/refresh, connection/controlled status,
+- [x] task016: Qt 6 Widgets status/events/settings application.
+- [x] Pairing code/countdown/copy/refresh, connection/controlled status,
   pause/resume and daemon recovery.
-- [ ] Light/dark/system theme and Apple-like quiet visual system without custom
+- [x] Light/dark/system theme and Apple-like quiet visual system without custom
   window chrome, QML or WebEngine.
-- [ ] GUI+daemon AppImage and non-root Ubuntu E2E; GUI exit leaves daemon alive.
+- [x] GUI+daemon AppImage, Ubuntu-class build/test and local non-root live
+  attach; final independent review and target-host E2E remain release evidence.
 
 ## Alpha A3: Controller Workspace Foundation
 
-- [ ] Device Hub → Control Workspace navigation.
-- [ ] Owner-scoped bounded recent Session index.
-- [ ] Left Session rail, center Agent surface, optional right Terminal/Device
+- [x] task017: Device Hub → Control Workspace navigation.
+- [x] task017: Owner-scoped bounded recent Session index.
+- [x] task017: Left Session rail, center Agent surface, optional right Terminal/Device
   dock; accessible resize/collapse/maximize and mobile fallback.
-- [ ] Provider setup in Controller settings with no Browser secret persistence.
+- [x] Provider setup entry in the Controller shell with no Browser secret
+  persistence; provider profiles/capabilities continue in A4.
 
 ## Alpha A4: Agent Domain/UI v2 And DSH
 
+- [x] task018: replace the legacy Controller visual/interaction layer with the
+  pinned DSH-first shell, conversation, composer and Settings baseline; retire
+  the standalone Device Manage page.
 - [ ] Standard event v2, Capability Descriptor and Runtime Session lifecycle.
 - [ ] DSH-inspired conversation nodes, tool renderers, planning/question/status,
   cancel/steer/retry/queue and richer Markdown/code/diff UX.

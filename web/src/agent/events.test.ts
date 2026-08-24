@@ -32,7 +32,7 @@ describe('Agent event projection', () => {
   it('ignores malformed and unknown payload fields safely', () => {
     expect(parseAgentEvent('turn.failed', '{bad json')).toBeNull()
     const state = projectAgentEvent(initialAgentViewState, event('turn.failed', { reason: 'rate_limited', extra: { future: true } }))
-    expect(state).toMatchObject({ turnState: 'failed', failure: 'rate_limited' })
+    expect(state).toMatchObject({ turnState: 'failed', failure: 'Agent 本轮执行失败。' })
   })
 
   it('projects the canonical Task006 stdout/stderr, truncation, denial and failure fields', () => {
@@ -133,5 +133,26 @@ describe('Agent event projection', () => {
 
     expect(state.timeline.map((item) => item.kind)).toEqual(['message', 'reasoning', 'tool', 'message'])
     expect(timelineTools(state)[0]).toMatchObject({ command: 'hostname', timeoutMs: 30000, output: 'lzr-host\n' })
+  })
+
+  it('orders a reopened command before the final answer even when persistence timestamps tie', () => {
+    const timestamp = '2026-08-24T10:00:00Z'
+    const state = projectAgentSnapshot({
+      session: { id: 'ags_tie', device_id: 'dev_1', approval_mode: 'full_access', provider: 'dsh', state: 'idle' },
+      messages: [
+        { id: 'msg_user_tie', role: 'user', content: 'Inspect', created_at: timestamp },
+        { id: 'msg_answer_tie', role: 'assistant', content: 'Done', created_at: timestamp },
+      ],
+      tool_calls: [{
+        id: 'tool_tie', name: 'remote_exec', arguments_json: '{"command":"hostname"}',
+        status: 'completed', decision: null, exit_code: 0, output_excerpt: 'remote-host\n',
+        created_at: timestamp, completed_at: timestamp,
+      }],
+    })
+
+    expect(state.timeline.map((item) => item.kind === 'message'
+      ? item.message.content
+      : item.kind === 'tool' ? item.tool.command : item.reasoning.content))
+      .toEqual(['Inspect', 'hostname', 'Done'])
   })
 })

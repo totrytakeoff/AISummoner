@@ -11,11 +11,11 @@ describe('login flow', () => {
       .mockResolvedValueOnce(jsonResponse({ devices: [] }))
     renderApp('/login')
 
-    expect(await screen.findByRole('heading', { name: 'Welcome back' })).toBeInTheDocument()
-    await userEvent.type(screen.getByLabelText('Password'), 'correct-password')
-    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+    expect(await screen.findByRole('heading', { name: '欢迎回来' })).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('密码'), 'correct-password')
+    await userEvent.click(screen.getByRole('button', { name: '登录' }))
 
-    expect(await screen.findByRole('heading', { name: 'Devices' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '设备' })).toBeInTheDocument()
     const loginCall = fetchMock.mock.calls.find(([url]) => url === '/api/v1/auth/login')
     expect(loginCall?.[1]).toMatchObject({ method: 'POST', body: JSON.stringify({ username: 'admin', password: 'correct-password' }) })
   })
@@ -27,10 +27,10 @@ describe('login flow', () => {
     const localStorageSpy = vi.spyOn(Storage.prototype, 'setItem')
     renderApp('/login')
 
-    await userEvent.type(await screen.findByLabelText('Password'), 'never-store-me')
-    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+    await userEvent.type(await screen.findByLabelText('密码'), 'never-store-me')
+    await userEvent.click(screen.getByRole('button', { name: '登录' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('invalid username or password')
+    expect(await screen.findByRole('alert')).toHaveTextContent('用户名或密码错误。')
     await waitFor(() => expect(localStorageSpy).not.toHaveBeenCalled())
   })
 })

@@ -28,6 +28,23 @@ func (function adapterFunc) Run(ctx context.Context, request RunRequest, sink Ev
 	return function(ctx, request, sink)
 }
 
+type recoverablePreflightAdapter struct {
+	configured atomic.Bool
+	runs       chan RunRequest
+}
+
+func (adapter *recoverablePreflightAdapter) PreflightTurn(context.Context) error {
+	if !adapter.configured.Load() {
+		return &AdapterError{Code: "credential_required", Err: errors.New("credential is not configured")}
+	}
+	return nil
+}
+
+func (adapter *recoverablePreflightAdapter) Run(ctx context.Context, request RunRequest, sink EventSink) error {
+	adapter.runs <- request
+	return sink.TextDelta(ctx, "recovered")
+}
+
 type auditCapture struct {
 	mu     sync.Mutex
 	events []store.AuditEvent
@@ -1541,6 +1558,140 @@ func TestProviderIsConfigurableAndValidated(t *testing.T) {
 	}
 }
 
+func TestCredentialPreflightDoesNotPersistAndConfiguredRetryReusesSession(t *testing.T) {
+	adapter := &recoverablePreflightAdapter{runs: make(chan RunRequest, 1)}
+	fixture := newServiceFixture(t, adapter, time.Second, nil)
+	session := fixture.createSession(store.AgentApprovalFullAccess)
+	const externalID = "ses_existing_dsh_conversation"
+	if err := fixture.store.UpdateAgentExternalSessionID(context.Background(), fixture.ownerID, session.ID, externalID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.store.UpdateAgentSessionState(context.Background(), fixture.ownerID, session.ID, store.AgentSessionFailed, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := fixture.service.StartTurn(context.Background(), fixture.ownerID, session.ID, "retry me"); err == nil {
+		t.Fatal("missing credential accepted a Turn")
+	} else {
+		var adapterError *AdapterError
+		if !errors.As(err, &adapterError) || adapterError.Code != "credential_required" {
+			t.Fatalf("missing credential error=%v", err)
+		}
+	}
+	missingSnapshot, err := fixture.service.Snapshot(context.Background(), fixture.ownerID, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if missingSnapshot.Session.State != store.AgentSessionFailed || len(missingSnapshot.Messages) != 0 || len(missingSnapshot.ToolCalls) != 0 {
+		t.Fatalf("preflight failure persisted a Turn: %#v", missingSnapshot)
+	}
+
+	adapter.configured.Store(true)
+	if _, err := fixture.service.StartTurn(context.Background(), fixture.ownerID, session.ID, "retry me"); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := waitSnapshot(t, fixture.service, fixture.ownerID, session.ID, store.AgentSessionIdle)
+	if snapshot.Session.ID != session.ID || len(snapshot.Messages) != 2 || snapshot.Messages[0].Content != "retry me" || snapshot.Messages[1].Content != "recovered" {
+		t.Fatalf("configured retry replaced or lost the conversation: %#v", snapshot)
+	}
+	select {
+	case request := <-adapter.runs:
+		if request.SessionID != session.ID || request.ExternalSessionID != externalID {
+			t.Fatalf("configured retry request=%#v", request)
+		}
+	default:
+		t.Fatal("configured retry never reached the Adapter")
+	}
+}
+
+func TestSessionPermissionUpdateIsAuthoritativeAndConflictsWithRunningTurn(t *testing.T) {
+	arguments, _ := json.Marshal(RemoteExecArguments{Command: "hostname", TimeoutMS: 30000})
+	fixture := newServiceFixture(t, &FakeAdapter{Steps: []FakeStep{{Kind: FakeTool, Tool: ToolRequest{
+		Name: ToolRemoteExec, Arguments: arguments,
+	}}}}, time.Second, nil)
+	session := fixture.createSession(store.AgentApprovalPerCommand)
+	updated, err := fixture.service.UpdateSessionApprovalMode(context.Background(), fixture.ownerID, session.ID, store.AgentApprovalFullAccess)
+	if err != nil || updated.ApprovalMode != store.AgentApprovalFullAccess {
+		t.Fatalf("permission update=%#v err=%v", updated, err)
+	}
+	if _, err := fixture.service.StartTurn(context.Background(), fixture.ownerID, session.ID, "run without another prompt"); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := waitSnapshot(t, fixture.service, fixture.ownerID, session.ID, store.AgentSessionIdle)
+	if fixture.executor.callCount() != 1 || len(snapshot.ToolCalls) != 1 || snapshot.ToolCalls[0].Decision != nil ||
+		snapshot.ToolCalls[0].Status != store.ToolCallCompleted {
+		t.Fatalf("Full Access did not execute directly: calls=%d snapshot=%#v", fixture.executor.callCount(), snapshot)
+	}
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	blocking := adapterFunc(func(ctx context.Context, _ RunRequest, sink EventSink) error {
+		close(entered)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-release:
+			return sink.TextDelta(ctx, "done")
+		}
+	})
+	racing := newServiceFixture(t, blocking, time.Second, nil)
+	running := racing.createSession(store.AgentApprovalPerCommand)
+	if _, err := racing.service.StartTurn(context.Background(), racing.ownerID, running.ID, "hold"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("Turn did not reach Adapter")
+	}
+	if _, err := racing.service.UpdateSessionApprovalMode(context.Background(), racing.ownerID, running.ID, store.AgentApprovalFullAccess); !errors.Is(err, ErrTurnInProgress) {
+		t.Fatalf("running permission update=%v", err)
+	}
+	close(release)
+	runningSnapshot := waitSnapshot(t, racing.service, racing.ownerID, running.ID, store.AgentSessionIdle)
+	if runningSnapshot.Session.ApprovalMode != store.AgentApprovalPerCommand {
+		t.Fatalf("conflicting permission update leaked into Turn: %#v", runningSnapshot.Session)
+	}
+}
+
+func TestArchiveClosesSubscribersAndRestoreDeleteKeepOwnershipBoundary(t *testing.T) {
+	fixture := newServiceFixture(t, &FakeAdapter{}, time.Second, nil)
+	session := fixture.createSession(store.AgentApprovalPerCommand)
+	events, unsubscribe, err := fixture.service.Subscribe(context.Background(), fixture.ownerID, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unsubscribe()
+	archived, err := fixture.service.SetSessionArchived(context.Background(), fixture.ownerID, session.ID, true)
+	if err != nil || archived.ArchivedAt == nil {
+		t.Fatalf("archive=%#v err=%v", archived, err)
+	}
+	select {
+	case _, open := <-events:
+		if open {
+			t.Fatal("archiving left an SSE subscriber open")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("archiving did not close the SSE subscriber")
+	}
+	if _, err := fixture.service.Snapshot(context.Background(), fixture.ownerID, session.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("archived Session remained on active surface: %v", err)
+	}
+	restored, err := fixture.service.SetSessionArchived(context.Background(), fixture.ownerID, session.ID, false)
+	if err != nil || restored.ArchivedAt != nil {
+		t.Fatalf("restore=%#v err=%v", restored, err)
+	}
+	if _, err := fixture.service.Snapshot(context.Background(), fixture.ownerID, session.ID); err != nil {
+		t.Fatalf("restored Session unavailable: %v", err)
+	}
+	if err := fixture.service.DeleteSession(context.Background(), fixture.ownerID, session.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.service.Snapshot(context.Background(), fixture.ownerID, session.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted Session remained visible: %v", err)
+	}
+}
+
 func TestSetAdapterBindsNewSessionsWithoutSwitchingExistingProviders(t *testing.T) {
 	oldRuns := make(chan string, 1)
 	newRuns := make(chan string, 1)
@@ -1609,10 +1760,21 @@ func TestSetAdapterValidationCloseAndUnavailablePersistedProvider(t *testing.T) 
 	if err := fixture.store.CreateAgentSession(context.Background(), missing); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.service.StartTurn(context.Background(), fixture.ownerID, missing.ID, "run safely"); err != nil {
+	if _, err := fixture.service.StartTurn(context.Background(), fixture.ownerID, missing.ID, "run safely"); err == nil {
+		t.Fatal("unavailable persisted provider accepted a new Turn")
+	} else {
+		var adapterError *AdapterError
+		if !errors.As(err, &adapterError) || adapterError.Code != "provider_unavailable" {
+			t.Fatalf("unavailable provider error=%v", err)
+		}
+	}
+	snapshot, err := fixture.service.Snapshot(context.Background(), fixture.ownerID, missing.ID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	waitSnapshot(t, fixture.service, fixture.ownerID, missing.ID, store.AgentSessionFailed)
+	if snapshot.Session.State != store.AgentSessionIdle || len(snapshot.Messages) != 0 {
+		t.Fatalf("unavailable provider mutated persisted Turn: %#v", snapshot)
+	}
 
 	fixture.service.Close()
 	if err := fixture.service.SetAdapter(ProviderDeepSeek, &FakeAdapter{}); !errors.Is(err, ErrServiceClosed) {

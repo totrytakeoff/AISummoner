@@ -16,6 +16,7 @@ import (
 	"github.com/aisummoner/aisummoner/internal/deepseek"
 	"github.com/aisummoner/aisummoner/internal/device"
 	"github.com/aisummoner/aisummoner/internal/devicegate"
+	"github.com/aisummoner/aisummoner/internal/dsh"
 	"github.com/aisummoner/aisummoner/internal/httpapi"
 	"github.com/aisummoner/aisummoner/internal/opencode"
 	"github.com/aisummoner/aisummoner/internal/opencodebridge"
@@ -127,6 +128,39 @@ type deepSeekProviderConfigurator struct {
 	registry agentAdapterRegistry
 }
 
+type dshCredentialWriter interface {
+	ConfigureCredential(context.Context, string) error
+	DescribeCredential(context.Context) (dsh.CredentialStatus, error)
+}
+
+type dshProviderConfigurator struct {
+	writer dshCredentialWriter
+}
+
+func (configurator *dshProviderConfigurator) ConfigureDSH(ctx context.Context, apiKey string) error {
+	if configurator == nil || configurator.writer == nil {
+		return agent.ErrServiceClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return configurator.writer.ConfigureCredential(ctx, apiKey)
+}
+
+func (configurator *dshProviderConfigurator) DescribeDSH(ctx context.Context) (agentapi.DSHCredentialStatus, error) {
+	if configurator == nil || configurator.writer == nil {
+		return agentapi.DSHCredentialStatus{}, agent.ErrServiceClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return agentapi.DSHCredentialStatus{}, err
+	}
+	status, err := configurator.writer.DescribeCredential(ctx)
+	if err != nil {
+		return agentapi.DSHCredentialStatus{}, err
+	}
+	return agentapi.DSHCredentialStatus{Configured: status.Configured, Writable: status.Writable}, nil
+}
+
 func (configurator *deepSeekProviderConfigurator) ConfigureDeepSeek(ctx context.Context, apiKey, model string) error {
 	if configurator == nil || configurator.registry == nil {
 		return agent.ErrServiceClosed
@@ -215,12 +249,13 @@ func buildServer(ctx context.Context, configuration config.Config, logger *slog.
 	}
 
 	var (
-		agentAdapter   agent.Adapter
-		provider       string
-		bridge         *opencodebridge.Bridge
-		bridgeServer   *http.Server
-		bridgeListener net.Listener
-		closeBridge    func(context.Context) error
+		agentAdapter    agent.Adapter
+		provider        string
+		bridge          *opencodebridge.Bridge
+		bridgeServer    *http.Server
+		bridgeListener  net.Listener
+		closeBridge     func(context.Context) error
+		dshConfigurator agentapi.DSHCredentialConfigurator
 	)
 	switch configuration.AgentAdapter {
 	case config.AgentAdapterFake:
@@ -274,6 +309,59 @@ func buildServer(ctx context.Context, configuration config.Config, logger *slog.
 		}
 		agentAdapter = deepSeekAdapter
 		provider = deepseek.ProviderName
+	case config.AgentAdapterDSH:
+		listenerConfig := net.ListenConfig{}
+		bridgeListener, err = listenerConfig.Listen(ctx, "tcp", configuration.AgentBridgeListenAddr)
+		if err != nil {
+			return nil, errors.New("bind DSH capability bridge listener")
+		}
+		startup.Add(func() { _ = bridgeListener.Close() })
+		bridge, err = opencodebridge.New(opencodebridge.Options{
+			Secret: configuration.AgentBridgeSecret, CallbackPath: dsh.CallbackPath,
+			ProofDomain: dsh.ProofDomain, Logger: logger,
+		})
+		if err != nil {
+			return nil, err
+		}
+		startup.Add(func() {
+			closeContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = bridge.Close(closeContext)
+		})
+		dshAdapter, adapterErr := dsh.NewAdapter(dsh.Options{
+			BaseURL: configuration.DSHURL, Bridge: bridge,
+		})
+		if adapterErr != nil {
+			return nil, adapterErr
+		}
+		dshHost, hostErr := dsh.StartHost(ctx, dsh.HostOptions{
+			NodePath: configuration.DSHNodePath, CLIPath: configuration.DSHCLIPath,
+			Home: configuration.DSHHome, BaseURL: configuration.DSHURL,
+			BridgeURL: configuration.DSHBridgeURL, BridgeSecret: configuration.AgentBridgeSecret,
+			Probe: dshAdapter,
+		})
+		if hostErr != nil {
+			return nil, hostErr
+		}
+		startup.Add(func() {
+			closeContext, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+			defer cancel()
+			_ = dshHost.Close(closeContext)
+		})
+		agentAdapter = dshAdapter
+		provider = dsh.ProviderName
+		dshConfigurator = &dshProviderConfigurator{writer: dshAdapter}
+		closeBridge = func(closeContext context.Context) error {
+			hostCloseError := dshHost.Close(closeContext)
+			bridgeCloseError := bridge.Close(closeContext)
+			return errors.Join(hostCloseError, bridgeCloseError)
+		}
+		bridgeServer = &http.Server{
+			Addr: configuration.AgentBridgeListenAddr, Handler: bridge.Handler(),
+			ReadHeaderTimeout: bridgeHeaderTimeout, IdleTimeout: bridgeIdleTimeout,
+			MaxHeaderBytes: maximumHTTPHeaderSize,
+			ErrorLog:       slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
+		}
 	default:
 		return nil, errors.New("unsupported Agent adapter")
 	}
@@ -306,6 +394,7 @@ func buildServer(ctx context.Context, configuration config.Config, logger *slog.
 	agentAPI, err := agentapi.New(agentapi.Options{
 		Auth: authService, Agent: agentService,
 		ProviderConfigurator: &deepSeekProviderConfigurator{registry: agentService},
+		DSHConfigurator:      dshConfigurator,
 		AllowedOrigin:        configuration.AllowedOrigin, Logger: logger,
 	})
 	if err != nil {

@@ -217,7 +217,7 @@ func (runtime *Runtime) finishShutdown(ctx context.Context) {
 	}
 	if runtime.bridgeServer != nil {
 		if err := runtime.closeBridge(ctx); err != nil {
-			runtime.shutdownErr = fmt.Errorf("close OpenCode bridge: %w", err)
+			runtime.shutdownErr = fmt.Errorf("close Agent capability bridge: %w", err)
 			return
 		}
 		if err := runtime.bridgeServer.Shutdown(ctx); !expectedHTTPShutdownError(err) {

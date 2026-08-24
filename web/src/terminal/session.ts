@@ -121,13 +121,13 @@ export function startTerminalSession(options: StartTerminalOptions): () => void 
 
   function failed() {
     if (!active) return
-    options.onState('error', 'The terminal connection encountered an error.')
+    options.onState('error', '终端连接发生错误。')
   }
 
   function closed(event: Event) {
     if (!active) return
     const closeEvent = event as CloseEvent
-    const detail = closeEvent.reason || (closeEvent.code === 1000 ? 'Terminal closed.' : 'Terminal connection closed.')
+    const detail = closeEvent.code === 1000 ? '终端已关闭。' : '终端连接已断开。'
     options.onState('closed', detail)
   }
 
@@ -135,7 +135,7 @@ export function startTerminalSession(options: StartTerminalOptions): () => void 
     try {
       const message = JSON.parse(data) as { type?: unknown; message?: unknown }
       if (message.type === 'terminal.error' && typeof message.message === 'string') {
-        options.onState('error', message.message)
+        options.onState('error', '终端返回错误。')
       }
     } catch {
       // Text frames are reserved for controls; malformed controls are not rendered as shell output.

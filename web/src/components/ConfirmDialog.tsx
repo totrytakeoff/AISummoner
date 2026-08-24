@@ -102,9 +102,9 @@ export function ConfirmDialog({
         <h2 id={titleID}>{title}</h2>
         <div id={descriptionID}>{description}</div>
         <div className="button-row">
-          <button ref={cancelRef} className="button ghost" type="button" onClick={onCancel} disabled={busy}>Cancel</button>
+          <button ref={cancelRef} className="button ghost" type="button" onClick={onCancel} disabled={busy}>取消</button>
           <button className="button danger" type="button" onClick={onConfirm} disabled={busy}>
-            {busy ? (busyLabel ?? 'Working…') : confirmLabel}
+            {busy ? (busyLabel ?? '处理中…') : confirmLabel}
           </button>
         </div>
       </section>

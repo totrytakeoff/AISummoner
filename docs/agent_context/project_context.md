@@ -53,12 +53,21 @@ AISummoner is a browser-controlled, server-side Agent and SSH remote execution p
 - Baseline 04 and ADR-0004 define the Alpha direction: Device-scoped Control
   Workspace, DSH-inspired Agent interaction, capability-driven Runtime
   adapters, and a Remote daemon/Desktop UI split.
+- Task017's Workspace foundation is independently approved. ADR-0005 and
+  Task018 replace its provisional presentation with the pinned DSH-first light
+  shell, retire Device Manage, and put Agent/Device configuration in Workspace
+  Settings while keeping Experience and Runtime adapters separate.
 - Server is single-node and authoritative for user/device/session ownership.
 - Online Tunnel connections live only in memory.
 - OpenCode custom `remote_exec` calls a Go loopback bridge; the direct DeepSeek Adapter invokes the same Go `RemoteExecInvoker`. In both cases the target device is derived from the owned AISummoner Session, never model input.
 - Deterministic tests must not depend on OpenCode free-tier availability.
-- The current Controller routes and CLI AppImage remain working migration
-  surfaces, not the target Alpha product architecture.
+- Legacy Controller routes remain safe migration redirects. The DSH-first
+  Workspace is now the target presentation baseline; its richer Runtime/event
+  contract remains Alpha work.
+- Task015/016 implemented the selected Qt 6 Widgets Remote Desktop Client and
+  a zero-configuration GUI+daemon AppImage. The local non-root live client is a
+  current test surface; combined independent review and target Ubuntu E2E remain
+  release evidence rather than an architecture unknown.
 
 ## Constraints
 
@@ -88,5 +97,6 @@ AISummoner is a browser-controlled, server-side Agent and SSH remote execution p
 - A richer coding Agent needs structured Remote file/patch capabilities beyond
   `remote_exec`; adding them without leaking Server-local authority is a major
   Alpha design risk.
-- Remote GUI toolkit/AppImage WebView compatibility remains an explicit spike,
-  not a settled implementation dependency.
+- Qt 6 Widgets is the settled Remote GUI toolkit. Its Ubuntu-compatible
+  AppImage is built from a pinned Ubuntu 22.04/Qt 6.2 class environment; future
+  Remote GUI work must preserve the private daemon IPC split.

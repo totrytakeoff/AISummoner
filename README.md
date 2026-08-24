@@ -170,21 +170,63 @@ CIDR 或整段子网。Server 只对精确匹配的 peer 读取专用
 ## Agent 运行模式
 
 - `AISUMMONER_AGENT_ADAPTER=fake`：确定性 MVP/测试模式；不读取、不验证、也不启动 OpenCode 或 Bridge。
-- `AISUMMONER_AGENT_ADAPTER=deepseek`：直接使用 DeepSeek Chat-Completions 流式 API；要求 HTTPS origin、全新轮换的 API Key 和显式模型。该模式不启动 OpenCode/Bridge，Provider 仍只能通过 AISummoner 的 `remote_exec` 审批边界操作选中的 Remote。
+- `AISUMMONER_AGENT_ADAPTER=dsh`：当前一等运行时。Server 监督固定版本的私有 DSH Host，DSH 保留原生 Session/推理/回复语义，但模型侧只获得一个由 AISummoner HMAC Bridge 提供的 `bash` 工具；命令仍必须经过当前 Device、当前 Turn 和 AISummoner 审批边界，DSH 的本地 shell/filesystem/tool 默认全部关闭。
+- `AISUMMONER_AGENT_ADAPTER=deepseek`：旧的直接 DeepSeek Chat-Completions 适配器，保留用于兼容与诊断。
 - `AISUMMONER_AGENT_ADAPTER=opencode`：要求数值 loopback OpenCode URL、Basic Auth 用户名/密码、模型、私有 workspace、独立 loopback Bridge listener、精确 callback URL 和至少 32 字节的 Bridge secret。
 
-Go Server 的 Provider 调用层与 Web presentation adapter 相互独立。Provider 原生事件必须先在 Server 归一化；Web 再把用户消息、折叠的 reasoning、最终回答和工具调用按事件顺序投影到同一 timeline，并按 Provider/工具选择展示器。DeepSeek 和 OpenCode 是真实 Provider；Fake 只用于确定性链路测试且会在 UI 中明确标识。交互职责参考 DSH 的持久会话、折叠思考与审批接管，但不引入其本地 shell、文件系统或插件后端。扩展规则见 [ADR-0003](docs/decisions/ADR-0003-agent-adapter-ui.md)。
+Go Server 的 Runtime Adapter 与 Web presentation adapter 相互独立。DSH 原生事件先由 Server 投影为有序的 reasoning、文本和工具生命周期；Web 再以 DSH-first 会话界面呈现。后续 OpenCode、Codex 与 Claude Code 复用同一产品安全权威和 UI 适配边界，而不是各自建立登录、Device 或审批系统。扩展规则见 [ADR-0003](docs/decisions/ADR-0003-agent-adapter-ui.md) 与 [ADR-0005](docs/decisions/ADR-0005-dsh-first-controller-experience.md)。
 
-进入 Agent 页面时，有历史会话就直接恢复；无历史且 Device 在线时自动创建默认 `per_command` 会话，不再先弹“选择模式”向导。`New conversation` 也直接创建新的逐命令确认会话。只有在某个真实待审批命令上显式确认“Approve session”，才会把当前会话提升为 Full Access；权限不会跨会话保留。
+进入 Agent 页面时，有历史会话就直接恢复；无历史且 Device 在线时按“设置 → Agent 与模型”中的默认权限自动创建会话，不再先弹模式向导。默认权限只影响未来会话；当前会话可在输入框下方随时切换“执行命令前询问”与“完全访问”，两处启用完全访问都必须确认风险。该权限只控制经过 AISummoner 审核的远程命令能力，不代表 DSH 获得本地文件系统或 shell 权限。
 
-交互测试不必登录 Server shell 写环境文件。管理员登录 Web 后，可以在 Agent
-页选择 `Set up DeepSeek`，粘贴 Key 并直接开始一个新的 DeepSeek 对话。Key
-只通过当前同源 HTTPS 请求进入 Server 进程内存：不写 SQLite、日志、审计、
-响应、URL 或浏览器持久存储；取消或提交成功后表单即清空。Server 重启后需要
-重新填写。模型已有默认值，通常只需粘贴 Key。无人值守部署仍可使用下方环境
-变量方式启动。
+管理员登录 Web 后，在“设置 → Agent 与模型”粘贴 DeepSeek API Key 即可配置
+DSH。Key 只通过当前同源 HTTPS 请求写入 Server 上 mode `0600` 的私有 DSH
+credentials store；不会写入 AISummoner SQLite、日志、审计、响应、URL 或浏览器
+持久存储，也不会再返回给浏览器。提交或取消后表单会清空。未配置 Key 时，Web
+会在创建 Turn 前给出明确提示，不会把用户消息写成失败记录；配置后可直接继续原
+会话。DSH Session 保留在同一私有 DSH home 中，并由 AISummoner Session 保存其
+external ID 以便恢复。会话列表可直接归档或确认删除；已归档会话统一在“设置 →
+会话管理”中恢复或永久删除。
 
-DeepSeek 与 OpenCode 是两个可替换的 Server-side Adapter，不是两套产品后端。认证、Device owner、审批、Tunnel/SSH、超时/输出上限、持久会话与 Web 事件始终只由 AISummoner 掌控。不要把 DSH 的 credential/session 目录复制到 Server；真实部署只注入新轮换的 DeepSeek Key。
+认证、Device owner、审批、Tunnel/SSH、超时/输出上限与 Web 事件始终只由
+AISummoner 掌控。DSH Host 和 capability Bridge 都只绑定数值 loopback，绝不
+挂到公共 Dispatcher，也不允许浏览器直接访问 DSH Web/API。
+
+### 构建固定 DSH 运行包
+
+DSH runtime 固定到本仓库记录的 upstream commit、`pnpm 11.7.0` 与官方
+`Node 24.19.0 linux-x64`。打包器从干净的本地 DSH checkout 做 `git archive`，
+按 upstream lockfile 串行安装/构建，再把 workspace 链接物化成无需 npm/pnpm 的
+独立运行树。Node、pnpm 与 Linux Landlock 包均先做固定摘要校验；构建期 Node
+heap 上限为 2 GiB，且每个重阶段要求至少 4 GiB `MemAvailable`，不会与 Go、
+Docker 或另一个 Node build 并行运行。
+
+`node-pty` 等原生模块必须在不高于目标机 glibc 的环境中构建。正式 Linux 包使用
+固定摘要的 Node 24 Bookworm builder（glibc 2.36），并给容器设置 2 CPU、3 GiB
+内存、4 GiB memory+swap 总上限。打包器会在该容器内显式重建并检查 `node-pty`，
+不会复用填充 pnpm store 的宿主机原生文件；不要直接在滚动发行版宿主机上制作部署包。
+
+```bash
+mkdir -m 700 -p "$PWD/.package-work" dist
+docker pull node:24.19.0-bookworm@sha256:934240a162082fd8b8a2f90cd5114446443f1eba1c5378f6687167ca405e6584
+sh deploy/package-dsh-runtime-container.sh \
+  /home/myself/workspace/deepseek-harness \
+  dist/aisummoner-dsh-runtime-linux-x64.tar.gz \
+  "$PWD/.package-work"
+
+mkdir -m 700 /tmp/aisummoner-dsh-check
+tar -xzf dist/aisummoner-dsh-runtime-linux-x64.tar.gz \
+  -C /tmp/aisummoner-dsh-check
+sh deploy/check-dsh-runtime.sh \
+  /tmp/aisummoner-dsh-check/aisummoner-dsh-runtime
+```
+
+归档根目录中的 `node/` 与 `runtime/` 必须一起部署。系统级默认路径是
+`/opt/aisummoner/dsh/node/bin/node` 与
+`/opt/aisummoner/dsh/runtime/lib/bin.js`；非 root 的直接部署可以放到私有绝对
+目录，并通过 `AISUMMONER_DSH_NODE_PATH`、`AISUMMONER_DSH_CLI_PATH` 覆盖。
+`AISUMMONER_DSH_HOME` 必须是独立的 `0700` 持久目录，不能指向运行包或公开静态
+目录。当前 Compose 示例仍只覆盖 Fake/legacy DeepSeek/OpenCode；DSH 首轮验收走
+同一非 root 身份下的 Server 直启 + 私有运行包，不能把 Host 拆成公开 sidecar。
 
 OpenCode 与 Bridge 都不得发布端口。部署示例使用同一 Docker network namespace，使二者能够通过 `127.0.0.1` 通信；OpenCode 只会在每个空 workspace 中看到 deny-by-default 策略和 `remote_exec` 工具。模型可用性不属于公共 `/healthz`：外部限流或不可用会在 Turn 中如实失败，不会回退到 Server 本地 shell。
 

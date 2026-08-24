@@ -257,6 +257,73 @@ func TestBridgeValidCallbackAndSecurityRejections(t *testing.T) {
 	}
 }
 
+func TestBridgeCustomCallbackPathAndProofDomainAreCryptographicallyIsolated(t *testing.T) {
+	secret := []byte(strings.Repeat("d", 32))
+	now := time.Date(2026, 8, 24, 1, 0, 0, 0, time.UTC)
+	const customPath = "/internal/dsh/remote-exec"
+	const customDomain = "AISummoner.DSHBridge.v1"
+	bridge, err := New(Options{
+		Secret: secret, CallbackPath: customPath, ProofDomain: customDomain,
+		Now: func() time.Time { return now }, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := bridge.Close(ctx); err != nil {
+			t.Errorf("close custom bridge: %v", err)
+		}
+	})
+	invoker := &recordingInvoker{result: agent.ToolResult{Stdout: "remote-only\n", ExitCode: 0}}
+	lease, err := bridge.Activate(context.Background(), "ags_dsh", testExternalSession, invoker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Close()
+	body := callbackBody(t, testExternalSession, "hostname", "", 30)
+	timestamp := strconv.FormatInt(now.Unix(), 10)
+	requestFor := func(path, domain string) *http.Request {
+		request := httptest.NewRequest(http.MethodPost, "http://bridge.invalid"+path, bytes.NewReader(body))
+		request.RemoteAddr = "127.0.0.1:43120"
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set(HeaderTimestamp, timestamp)
+		proof := signProof(secret, domain, testExternalSession, timestamp)
+		request.Header.Set("Authorization", Authorization+" "+base64.RawURLEncoding.EncodeToString(proof))
+		return request
+	}
+	if response := perform(bridge, requestFor(CallbackPath, customDomain)); response.Code != http.StatusNotFound {
+		t.Fatalf("default path status=%d", response.Code)
+	}
+	if response := perform(bridge, requestFor(customPath, proofDomain)); response.Code != http.StatusUnauthorized {
+		t.Fatalf("OpenCode proof on DSH bridge status=%d", response.Code)
+	}
+	response := perform(bridge, requestFor(customPath, customDomain))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "remote-only") {
+		t.Fatalf("custom bridge status=%d body=%q", response.Code, response.Body.String())
+	}
+	calls, _, _ := invoker.snapshot()
+	if len(calls) != 1 {
+		t.Fatalf("custom bridge calls=%d", len(calls))
+	}
+}
+
+func TestBridgeRejectsInvalidCustomWireIdentity(t *testing.T) {
+	secret := []byte(strings.Repeat("b", 32))
+	tests := []Options{
+		{Secret: secret, CallbackPath: "/public/dsh", ProofDomain: "safe"},
+		{Secret: secret, CallbackPath: "/internal/dsh//remote-exec", ProofDomain: "safe"},
+		{Secret: secret, CallbackPath: "/internal/dsh/remote-exec?x=1", ProofDomain: "safe"},
+		{Secret: secret, CallbackPath: "/internal/dsh/remote-exec", ProofDomain: "bad domain"},
+	}
+	for _, options := range tests {
+		if _, err := New(options); err == nil {
+			t.Fatalf("invalid custom bridge options accepted: %#v", options)
+		}
+	}
+}
+
 func TestBridgeConcurrentSessionsNeverCrossInvoke(t *testing.T) {
 	bridge, secret, now := newTestBridge(t)
 	first := &recordingInvoker{result: agent.ToolResult{Stdout: "first"}}

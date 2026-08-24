@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { APIError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { InlineError } from '../components/InlineError'
+import { AISummonerMark } from '../components/Icons'
 
 interface ReturnLocationState {
   from?: string
@@ -27,7 +28,7 @@ export function LoginPage() {
       const state = location.state as ReturnLocationState | null
       navigate(state?.from || '/devices', { replace: true })
     } catch (nextError) {
-      setError(nextError instanceof APIError ? nextError.message : 'Unable to sign in. Try again.')
+      setError(nextError instanceof APIError ? nextError.message : '无法登录，请重试。')
     } finally {
       setSubmitting(false)
     }
@@ -37,14 +38,13 @@ export function LoginPage() {
     <main className="auth-page">
       <section className="auth-card" aria-labelledby="login-title">
         <div className="brand auth-brand">
-          <span className="brand-mark" aria-hidden="true">A</span>
+          <span className="brand-mark" aria-hidden="true"><AISummonerMark /></span>
           <span>AISummoner</span>
         </div>
-        <p className="eyebrow">Remote execution control plane</p>
-        <h1 id="login-title">Welcome back</h1>
-        <p className="muted">Sign in to connect a terminal or Agent to your devices.</p>
+        <h1 id="login-title">欢迎回来</h1>
+        <p className="muted">登录后即可连接设备并继续 Agent 会话。</p>
         <form onSubmit={submit} className="stack-form">
-          <label htmlFor="username">Username</label>
+          <label htmlFor="username">用户名</label>
           <input
             id="username"
             name="username"
@@ -53,7 +53,7 @@ export function LoginPage() {
             onChange={(event) => setUsername(event.target.value)}
             required
           />
-          <label htmlFor="password">Password</label>
+          <label htmlFor="password">密码</label>
           <input
             id="password"
             name="password"
@@ -65,7 +65,7 @@ export function LoginPage() {
           />
           <InlineError message={error} />
           <button className="button primary" type="submit" disabled={submitting}>
-            {submitting ? 'Signing in…' : 'Sign in'}
+            {submitting ? '正在登录…' : '登录'}
           </button>
         </form>
       </section>

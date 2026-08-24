@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -23,9 +24,12 @@ const (
 	ToolCallCompleted = "completed"
 	ToolCallDenied    = "denied"
 	ToolCallFailed    = "failed"
+
+	recentAgentSessionLimit = 50
+	agentSessionTitleRunes  = 80
 )
 
-const agentSessionOwnerPredicate = `agent_sessions.user_id = ?
+const agentSessionOwnershipPredicate = `agent_sessions.user_id = ?
 	AND agent_sessions.state <> 'revoked'
 	AND EXISTS (
 		SELECT 1 FROM devices
@@ -33,12 +37,16 @@ const agentSessionOwnerPredicate = `agent_sessions.user_id = ?
 		AND devices.owner_user_id = agent_sessions.user_id
 	)`
 
+const agentSessionOwnerPredicate = agentSessionOwnershipPredicate + `
+	AND agent_sessions.archived_at IS NULL`
+
 const agentToolOwnerPredicate = `EXISTS (
 	SELECT 1 FROM agent_sessions JOIN devices ON devices.id = agent_sessions.device_id
-	WHERE agent_sessions.id = tool_calls.session_id
-	AND agent_sessions.user_id = ?
-	AND agent_sessions.state <> 'revoked'
-	AND devices.owner_user_id = agent_sessions.user_id
+		WHERE agent_sessions.id = tool_calls.session_id
+		AND agent_sessions.user_id = ?
+		AND agent_sessions.state <> 'revoked'
+		AND agent_sessions.archived_at IS NULL
+		AND devices.owner_user_id = agent_sessions.user_id
 )`
 
 type agentQueryer interface {
@@ -58,6 +66,7 @@ type AgentSession struct {
 	State             string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+	ArchivedAt        *time.Time
 }
 
 type AgentMessage struct {
@@ -85,6 +94,27 @@ type AgentSnapshot struct {
 	Session   AgentSession
 	Messages  []AgentMessage
 	ToolCalls []ToolCall
+}
+
+// AgentSessionSummary is the bounded Controller index projection. Title is
+// derived from the first user message and never includes provider credentials
+// or ExternalSessionID.
+type AgentSessionSummary struct {
+	ID           string
+	DeviceID     string
+	DeviceName   string
+	ApprovalMode string
+	Provider     string
+	State        string
+	Title        string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	ArchivedAt   *time.Time
+}
+
+type AgentSettings struct {
+	DefaultApprovalMode string
+	UpdatedAt           *time.Time
 }
 
 // CreateAgentSession uses an INSERT ... SELECT ownership check, so a caller
@@ -168,6 +198,236 @@ func (s *Store) LatestAgentSnapshotByDeviceOwner(ctx context.Context, ownerUserI
 		return AgentSnapshot{}, fmt.Errorf("commit latest agent snapshot: %w", err)
 	}
 	return AgentSnapshot{Session: session, Messages: messages, ToolCalls: toolCalls}, nil
+}
+
+// RecentAgentSessionsByDeviceOwner returns a fixed-size, newest-first index.
+// The Device-owner and non-revoked predicates are evaluated in the same SQL
+// statement, so an unowned or unknown Device is indistinguishable from one
+// with no visible Sessions.
+func (s *Store) RecentAgentSessionsByDeviceOwner(ctx context.Context, ownerUserID, deviceID string) ([]AgentSessionSummary, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT agent_sessions.id, agent_sessions.device_id, devices.name,
+		agent_sessions.approval_mode, agent_sessions.provider, agent_sessions.state,
+		agent_sessions.created_at, agent_sessions.updated_at, agent_sessions.archived_at,
+		COALESCE((
+			SELECT substr(agent_messages.content, 1, 512)
+			FROM agent_messages
+			WHERE agent_messages.session_id = agent_sessions.id AND agent_messages.role = 'user'
+			ORDER BY agent_messages.created_at, agent_messages.id LIMIT 1
+		), '')
+		FROM agent_sessions JOIN devices ON devices.id = agent_sessions.device_id
+		WHERE agent_sessions.user_id = ? AND agent_sessions.device_id = ? AND `+agentSessionOwnerPredicate+`
+		ORDER BY agent_sessions.updated_at DESC, agent_sessions.created_at DESC, agent_sessions.id DESC
+		LIMIT ?`, ownerUserID, deviceID, ownerUserID, recentAgentSessionLimit)
+	if err != nil {
+		return nil, fmt.Errorf("list recent agent sessions: %w", err)
+	}
+	defer rows.Close()
+	values := make([]AgentSessionSummary, 0)
+	for rows.Next() {
+		var summary AgentSessionSummary
+		var createdAt, updatedAt, title string
+		var archivedAt sql.NullString
+		if err := rows.Scan(&summary.ID, &summary.DeviceID, &summary.DeviceName, &summary.ApprovalMode,
+			&summary.Provider, &summary.State, &createdAt, &updatedAt, &archivedAt, &title); err != nil {
+			return nil, fmt.Errorf("scan recent agent session: %w", err)
+		}
+		summary.CreatedAt, err = decodeTime(createdAt)
+		if err != nil {
+			return nil, err
+		}
+		summary.UpdatedAt, err = decodeTime(updatedAt)
+		if err != nil {
+			return nil, err
+		}
+		summary.Title = normalizeAgentSessionTitle(title)
+		summary.ArchivedAt, err = decodeNullableTime(archivedAt)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, summary)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate recent agent sessions: %w", err)
+	}
+	return values, nil
+}
+
+// ArchivedAgentSessionsByOwner returns a bounded newest-first management view.
+// It never exposes sessions after Device ownership is removed.
+func (s *Store) ArchivedAgentSessionsByOwner(ctx context.Context, ownerUserID string) ([]AgentSessionSummary, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT agent_sessions.id, agent_sessions.device_id, devices.name,
+		agent_sessions.approval_mode, agent_sessions.provider, agent_sessions.state,
+		agent_sessions.created_at, agent_sessions.updated_at, agent_sessions.archived_at,
+		COALESCE((
+			SELECT substr(agent_messages.content, 1, 512)
+			FROM agent_messages
+			WHERE agent_messages.session_id = agent_sessions.id AND agent_messages.role = 'user'
+			ORDER BY agent_messages.created_at, agent_messages.id LIMIT 1
+		), '')
+		FROM agent_sessions JOIN devices ON devices.id = agent_sessions.device_id
+		WHERE agent_sessions.archived_at IS NOT NULL AND `+agentSessionOwnershipPredicate+`
+		ORDER BY agent_sessions.archived_at DESC, agent_sessions.updated_at DESC, agent_sessions.id DESC
+		LIMIT ?`, ownerUserID, recentAgentSessionLimit)
+	if err != nil {
+		return nil, fmt.Errorf("list archived agent sessions: %w", err)
+	}
+	defer rows.Close()
+	values := make([]AgentSessionSummary, 0)
+	for rows.Next() {
+		var summary AgentSessionSummary
+		var createdAt, updatedAt, title string
+		var archivedAt sql.NullString
+		if err := rows.Scan(&summary.ID, &summary.DeviceID, &summary.DeviceName, &summary.ApprovalMode,
+			&summary.Provider, &summary.State, &createdAt, &updatedAt, &archivedAt, &title); err != nil {
+			return nil, fmt.Errorf("scan archived agent session: %w", err)
+		}
+		var decodeErr error
+		summary.CreatedAt, decodeErr = decodeTime(createdAt)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		summary.UpdatedAt, decodeErr = decodeTime(updatedAt)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		summary.ArchivedAt, decodeErr = decodeNullableTime(archivedAt)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		summary.Title = normalizeAgentSessionTitle(title)
+		values = append(values, summary)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate archived agent sessions: %w", err)
+	}
+	return values, nil
+}
+
+func (s *Store) AgentSettingsByOwner(ctx context.Context, ownerUserID string) (AgentSettings, error) {
+	var settings AgentSettings
+	var updatedAt sql.NullString
+	err := s.db.QueryRowContext(ctx, `SELECT agent_user_settings.default_approval_mode,
+		agent_user_settings.updated_at FROM agent_user_settings JOIN users
+		ON users.id = agent_user_settings.user_id WHERE users.id = ?`, ownerUserID).
+		Scan(&settings.DefaultApprovalMode, &updatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		var exists int
+		if lookupErr := s.db.QueryRowContext(ctx, "SELECT 1 FROM users WHERE id = ?", ownerUserID).Scan(&exists); lookupErr != nil {
+			if errors.Is(lookupErr, sql.ErrNoRows) {
+				return AgentSettings{}, ErrNotFound
+			}
+			return AgentSettings{}, fmt.Errorf("look up agent settings owner: %w", lookupErr)
+		}
+		return AgentSettings{DefaultApprovalMode: AgentApprovalPerCommand}, nil
+	}
+	if err != nil {
+		return AgentSettings{}, fmt.Errorf("get agent settings: %w", err)
+	}
+	var decodeErr error
+	settings.UpdatedAt, decodeErr = decodeNullableTime(updatedAt)
+	if decodeErr != nil {
+		return AgentSettings{}, decodeErr
+	}
+	return settings, nil
+}
+
+func (s *Store) UpdateAgentSettings(ctx context.Context, ownerUserID, approvalMode string, now time.Time) (AgentSettings, error) {
+	if !validApprovalMode(approvalMode) {
+		return AgentSettings{}, errors.New("invalid default agent approval mode")
+	}
+	result, err := s.db.ExecContext(ctx, `INSERT INTO agent_user_settings(user_id, default_approval_mode, updated_at)
+		SELECT users.id, ?, ? FROM users WHERE users.id = ?
+		ON CONFLICT(user_id) DO UPDATE SET default_approval_mode = excluded.default_approval_mode,
+		updated_at = excluded.updated_at`, approvalMode, encodeTime(now), ownerUserID)
+	if err != nil {
+		return AgentSettings{}, fmt.Errorf("update agent settings: %w", err)
+	}
+	if err := requireOneRow(result); err != nil {
+		return AgentSettings{}, err
+	}
+	return s.AgentSettingsByOwner(ctx, ownerUserID)
+}
+
+func (s *Store) UpdateAgentSessionApprovalMode(ctx context.Context, ownerUserID, sessionID, approvalMode string, now time.Time) (AgentSession, error) {
+	if !validApprovalMode(approvalMode) {
+		return AgentSession{}, errors.New("invalid agent approval mode")
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE agent_sessions SET approval_mode = ?, updated_at = ?
+		WHERE id = ? AND state IN ('idle', 'failed') AND `+agentSessionOwnerPredicate,
+		approvalMode, encodeTime(now), sessionID, ownerUserID)
+	if err != nil {
+		return AgentSession{}, fmt.Errorf("update agent approval mode: %w", err)
+	}
+	if affected, inspectErr := result.RowsAffected(); inspectErr != nil {
+		return AgentSession{}, fmt.Errorf("inspect agent approval update: %w", inspectErr)
+	} else if affected != 1 {
+		if _, lookupErr := s.AgentSessionByOwner(ctx, ownerUserID, sessionID); lookupErr != nil {
+			return AgentSession{}, lookupErr
+		}
+		return AgentSession{}, ErrConflict
+	}
+	return s.AgentSessionByOwner(ctx, ownerUserID, sessionID)
+}
+
+func (s *Store) SetAgentSessionArchived(ctx context.Context, ownerUserID, sessionID string, archived bool, now time.Time) (AgentSession, error) {
+	var archivedAt any
+	if archived {
+		archivedAt = encodeTime(now)
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE agent_sessions SET archived_at = ?, updated_at = ?
+		WHERE id = ? AND state IN ('idle', 'failed') AND `+agentSessionOwnershipPredicate,
+		archivedAt, encodeTime(now), sessionID, ownerUserID)
+	if err != nil {
+		return AgentSession{}, fmt.Errorf("set agent session archived: %w", err)
+	}
+	if affected, inspectErr := result.RowsAffected(); inspectErr != nil {
+		return AgentSession{}, fmt.Errorf("inspect agent archive update: %w", inspectErr)
+	} else if affected != 1 {
+		if _, lookupErr := agentSessionByManagingOwnerQuery(ctx, s.db, ownerUserID, sessionID); lookupErr != nil {
+			return AgentSession{}, lookupErr
+		}
+		return AgentSession{}, ErrConflict
+	}
+	return agentSessionByManagingOwnerQuery(ctx, s.db, ownerUserID, sessionID)
+}
+
+func (s *Store) DeleteAgentSessionByOwner(ctx context.Context, ownerUserID, sessionID string) (AgentSession, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return AgentSession{}, fmt.Errorf("begin agent session deletion: %w", err)
+	}
+	defer tx.Rollback()
+	session, err := agentSessionByManagingOwnerQuery(ctx, tx, ownerUserID, sessionID)
+	if err != nil {
+		return AgentSession{}, err
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM agent_sessions
+		WHERE id = ? AND state IN ('idle', 'failed') AND `+agentSessionOwnershipPredicate,
+		sessionID, ownerUserID)
+	if err != nil {
+		return AgentSession{}, fmt.Errorf("delete agent session: %w", err)
+	}
+	if affected, inspectErr := result.RowsAffected(); inspectErr != nil {
+		return AgentSession{}, fmt.Errorf("inspect agent session deletion: %w", inspectErr)
+	} else if affected != 1 {
+		return AgentSession{}, ErrConflict
+	}
+	if err := tx.Commit(); err != nil {
+		return AgentSession{}, fmt.Errorf("commit agent session deletion: %w", err)
+	}
+	return session, nil
+}
+
+func normalizeAgentSessionTitle(value string) string {
+	value = strings.Join(strings.Fields(value), " ")
+	if value == "" {
+		return "New conversation"
+	}
+	runes := []rune(value)
+	if len(runes) <= agentSessionTitleRunes {
+		return value
+	}
+	return strings.TrimSpace(string(runes[:agentSessionTitleRunes-1])) + "…"
 }
 
 func (s *Store) UpdateAgentSessionState(ctx context.Context, ownerUserID, sessionID, state string, now time.Time) error {
@@ -438,8 +698,10 @@ func agentToolCallsByOwnerQuery(ctx context.Context, queryer agentQueryer, owner
 	return values, nil
 }
 
-const agentSessionSelect = `SELECT id, user_id, device_id, approval_mode, provider,
-	external_session_id, state, created_at, updated_at FROM agent_sessions`
+const agentSessionColumns = `id, user_id, device_id, approval_mode, provider,
+	external_session_id, state, created_at, updated_at, archived_at`
+
+const agentSessionSelect = `SELECT ` + agentSessionColumns + ` FROM agent_sessions`
 
 const toolCallSelect = `SELECT tool_calls.id, tool_calls.session_id, tool_calls.name,
 	tool_calls.arguments_json, tool_calls.status, tool_calls.decision, tool_calls.exit_code,
@@ -448,6 +710,11 @@ const toolCallSelect = `SELECT tool_calls.id, tool_calls.session_id, tool_calls.
 func agentSessionByOwnerQuery(ctx context.Context, queryer agentQueryer, ownerUserID, sessionID string) (AgentSession, error) {
 	return scanAgentSession(queryer.QueryRowContext(ctx, agentSessionSelect+`
 		WHERE agent_sessions.id = ? AND `+agentSessionOwnerPredicate, sessionID, ownerUserID))
+}
+
+func agentSessionByManagingOwnerQuery(ctx context.Context, queryer agentQueryer, ownerUserID, sessionID string) (AgentSession, error) {
+	return scanAgentSession(queryer.QueryRowContext(ctx, agentSessionSelect+`
+		WHERE agent_sessions.id = ? AND `+agentSessionOwnershipPredicate, sessionID, ownerUserID))
 }
 
 func agentToolCallByOwnerQuery(ctx context.Context, queryer agentQueryer, ownerUserID, toolCallID string) (ToolCall, error) {
@@ -459,8 +726,9 @@ func scanAgentSession(row rowScanner) (AgentSession, error) {
 	var session AgentSession
 	var externalSessionID sql.NullString
 	var createdAt, updatedAt string
+	var archivedAt sql.NullString
 	if err := row.Scan(&session.ID, &session.UserID, &session.DeviceID, &session.ApprovalMode,
-		&session.Provider, &externalSessionID, &session.State, &createdAt, &updatedAt); err != nil {
+		&session.Provider, &externalSessionID, &session.State, &createdAt, &updatedAt, &archivedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return AgentSession{}, ErrNotFound
 		}
@@ -475,6 +743,10 @@ func scanAgentSession(row rowScanner) (AgentSession, error) {
 		return AgentSession{}, err
 	}
 	session.UpdatedAt, err = decodeTime(updatedAt)
+	if err != nil {
+		return AgentSession{}, err
+	}
+	session.ArchivedAt, err = decodeNullableTime(archivedAt)
 	if err != nil {
 		return AgentSession{}, err
 	}
