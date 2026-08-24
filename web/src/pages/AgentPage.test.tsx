@@ -324,8 +324,14 @@ describe('Agent page lifecycle and approval boundaries', () => {
           id: 'ags_missing_key', device_id: onlineDevice.id, approval_mode: 'per_command', provider: 'dsh', state: 'failed',
         } })))
       }
-      if (url === '/api/v1/agent-provider/dsh') {
-        return Promise.resolve(jsonResponse({ credential: { configured, writable: true } }))
+      if (url === '/api/v1/agent-sessions/ags_missing_key/models' && (init?.method ?? 'GET') === 'GET') {
+        return Promise.resolve(jsonResponse({
+          current: { provider: 'deepseek-official', model: 'deepseek-chat' }, routable: true,
+          current_credential: { configured, writable: true }, failures: [],
+          groups: [{ id: 'deepseek-official', name: 'DeepSeek', models: [{
+            id: 'deepseek-chat', name: 'DeepSeek Chat', reasoning_efforts: [],
+          }] }],
+        }))
       }
       if (url === '/api/v1/agent-sessions/ags_missing_key/messages' && init?.method === 'POST') {
         return Promise.resolve(jsonResponse({ message: { id: 'msg_retry' } }, 202))
@@ -334,7 +340,7 @@ describe('Agent page lifecycle and approval boundaries', () => {
     })
     renderAgent()
 
-    expect(await screen.findByText('尚未配置 DeepSeek API 密钥')).toBeInTheDocument()
+    expect(await screen.findByText('DeepSeek缺少 API 密钥')).toBeInTheDocument()
     expect(screen.queryByText('上一轮 Agent 执行失败')).not.toBeInTheDocument()
     const prompt = screen.getByLabelText('向 Agent 发送消息')
     const source = await latestEventSource()
@@ -342,7 +348,7 @@ describe('Agent page lifecycle and approval boundaries', () => {
     expect(prompt).toBeDisabled()
 
     configured = true
-    act(() => window.dispatchEvent(new Event('aisummoner:dsh-credential-changed')))
+    act(() => window.dispatchEvent(new Event('aisummoner:dsh-provider-changed')))
     await waitFor(() => expect(prompt).toBeEnabled())
     expect(screen.queryByText('上一轮 Agent 执行失败')).not.toBeInTheDocument()
     await user.type(prompt, '继续原来的任务')
@@ -353,6 +359,55 @@ describe('Agent page lifecycle and approval boundaries', () => {
     ))
     expect(fetchMock.mock.calls.filter(([url, init]) =>
       url === '/api/v1/devices/dev_online/agent-sessions' && init?.method === 'POST')).toHaveLength(0)
+  })
+
+  it('switches the DSH provider, model, and reasoning effort on the existing conversation', async () => {
+    const user = userEvent.setup()
+    let selected = { provider: 'deepseek-official', model: 'deepseek-chat', reasoning_effort: '' }
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = String(input)
+      if (url === '/api/v1/devices/dev_online') return Promise.resolve(jsonResponse({ device: onlineDevice }))
+      if (url === '/api/v1/devices/dev_online/agent-sessions' && (init?.method ?? 'GET') === 'GET') {
+        return Promise.resolve(jsonResponse(agentSnapshot({ session: {
+          id: 'ags_model_picker', device_id: onlineDevice.id, approval_mode: 'per_command', provider: 'dsh', state: 'idle',
+        } })))
+      }
+      if (url === '/api/v1/agent-sessions/ags_model_picker/models' && (init?.method ?? 'GET') === 'GET') {
+        return Promise.resolve(jsonResponse({
+          current: selected, routable: true, current_credential: { configured: true, writable: true }, failures: [],
+          groups: [
+            { id: 'deepseek-official', name: 'DeepSeek', models: [{
+              id: 'deepseek-chat', name: 'DeepSeek Chat', reasoning_efforts: [],
+            }] },
+            { id: 'acme-gateway', name: 'Acme Gateway', models: [{
+              id: 'qwen-coder', name: 'Qwen Coder', default_reasoning_effort: 'medium',
+              reasoning_efforts: [{ id: 'medium', name: '中' }, { id: 'high', name: '高' }],
+            }] },
+          ],
+        }))
+      }
+      if (url === '/api/v1/agent-sessions/ags_model_picker/models' && init?.method === 'PATCH') {
+        selected = JSON.parse(String(init.body)) as typeof selected
+        return Promise.resolve(jsonResponse({ selected }))
+      }
+      return Promise.reject(new Error(`unexpected fetch ${url} ${init?.method ?? 'GET'}`))
+    })
+    renderAgent()
+
+    const picker = await screen.findByRole('button', { name: /DeepSeek Chat/ })
+    await user.click(picker)
+    await user.click(screen.getByRole('menuitemradio', { name: /Qwen Coder/ }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /Qwen Coder/ })).toBeInTheDocument())
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/agent-sessions/ags_model_picker/models', expect.objectContaining({
+      method: 'PATCH', body: JSON.stringify({ provider: 'acme-gateway', model: 'qwen-coder', reasoning_effort: 'medium' }),
+    }))
+
+    await user.click(screen.getByRole('button', { name: /Qwen Coder/ }))
+    await user.click(screen.getByRole('button', { name: '高' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/agent-sessions/ags_model_picker/models', expect.objectContaining({
+      method: 'PATCH', body: JSON.stringify({ provider: 'acme-gateway', model: 'qwen-coder', reasoning_effort: 'high' }),
+    })))
+    expect(selected.reasoning_effort).toBe('high')
   })
 
   it('edits the authoritative current-session permission with a Full Access risk confirmation', async () => {

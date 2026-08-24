@@ -59,6 +59,9 @@ updated_by: planner
 - [x] task020: real DSH Host/Adapter/Capability Bridge → Remote SSH chain.
 - [x] task021: Session permission, credential recovery, ordered replay,
   collapse-all, archive/delete and global Settings parity.
+- [x] task022: DSH-native multi-provider configuration, redacted credential
+  readiness and current-Session provider/model/reasoning selection behind the
+  common optional Runtime configuration boundary.
 - [ ] Standard event v2, Capability Descriptor and Runtime Session lifecycle.
 - [ ] DSH-inspired conversation nodes, tool renderers, planning/question/status,
   cancel/steer/retry/queue and richer Markdown/code/diff UX.

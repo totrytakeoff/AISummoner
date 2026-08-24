@@ -1,9 +1,9 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import type { FormEvent } from 'react'
 import { APIError, api } from '../api/client'
-import type { AgentSessionSummary, AgentSettings, ApprovalMode, Device, DSHCredentialStatus } from '../api/types'
+import type { AgentSessionSummary, AgentSettings, ApprovalMode, Device } from '../api/types'
 import { controllerRuntimeDescription, dshAgentExperience } from '../agent/experience'
 import { ConfirmDialog } from './ConfirmDialog'
+import { RuntimeProvidersSettings } from './RuntimeProvidersSettings'
 import {
   ArchiveIcon,
   CloseIcon,
@@ -24,7 +24,6 @@ interface ControllerSettingsDialogProps {
   runtimeLabel?: string
   username: string
   onClose: () => void
-  onConfigureDSH?: (apiKey: string) => Promise<void>
   onUnpair?: () => Promise<void>
   onSignOut: () => Promise<void>
   onArchivedSessionsChanged?: () => void
@@ -56,7 +55,6 @@ export function ControllerSettingsDialog({
   runtimeLabel = 'DeepSeek Harness',
   username,
   onClose,
-  onConfigureDSH = (apiKey) => api.configureDSH(apiKey),
   onUnpair,
   onSignOut,
   onArchivedSessionsChanged,
@@ -65,12 +63,6 @@ export function ControllerSettingsDialog({
   const sections = useMemo(() => allSections.filter((item) => item.id !== 'device' || hasDevice), [hasDevice])
   const safeInitialSection = initialSection === 'device' && !hasDevice ? 'general' : initialSection
   const [section, setSection] = useState<ControllerSettingsSection>(safeInitialSection)
-  const [apiKey, setAPIKey] = useState('')
-  const [configuring, setConfiguring] = useState(false)
-  const [providerStatus, setProviderStatus] = useState<DSHCredentialStatus | null>(null)
-  const [providerLoading, setProviderLoading] = useState(true)
-  const [providerError, setProviderError] = useState<string | null>(null)
-  const [providerNotice, setProviderNotice] = useState<string | null>(null)
   const [settings, setSettings] = useState<AgentSettings | null>(null)
   const [settingsLoading, setSettingsLoading] = useState(true)
   const [settingsSaving, setSettingsSaving] = useState(false)
@@ -93,7 +85,7 @@ export function ControllerSettingsDialog({
   const titleID = useId()
 
   closeHandler.current = onClose
-  busy.current = configuring || settingsSaving || Boolean(mutatingSessionID) || unpairing || signingOut
+  busy.current = settingsSaving || Boolean(mutatingSessionID) || unpairing || signingOut
   nestedConfirmation.current = confirmingUnpair || confirmDefaultFullAccess || Boolean(deleteTarget)
 
   useEffect(() => {
@@ -102,16 +94,6 @@ export function ControllerSettingsDialog({
 
   useEffect(() => {
     let current = true
-    void api.dshCredentialStatus().then((status) => {
-      if (!current) return
-      setProviderStatus(status)
-      setProviderError(null)
-    }).catch((nextError) => {
-      if (!current) return
-      setProviderError(nextError instanceof APIError ? nextError.message : '无法读取 DSH 凭据状态。')
-    }).finally(() => {
-      if (current) setProviderLoading(false)
-    })
     void api.agentSettings().then((value) => {
       if (!current) return
       setSettings(value)
@@ -176,27 +158,6 @@ export function ControllerSettingsDialog({
       if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true })
     }
   }, [])
-
-  async function configure(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const key = apiKey.trim()
-    if (!key || configuring) return
-    setConfiguring(true)
-    setProviderError(null)
-    setProviderNotice(null)
-    try {
-      await onConfigureDSH(key)
-      const status = await api.dshCredentialStatus()
-      setProviderStatus(status)
-      setAPIKey('')
-      setProviderNotice('密钥已保存。当前会话和旧会话都可以立即继续使用。')
-      window.dispatchEvent(new Event('aisummoner:dsh-credential-changed'))
-    } catch (nextError) {
-      setProviderError(nextError instanceof APIError ? nextError.message : '无法配置 DSH 运行时。')
-    } finally {
-      setConfiguring(false)
-    }
-  }
 
   async function saveDefaultPermission(mode: ApprovalMode) {
     if (settingsSaving || settings?.default_approval_mode === mode) {
@@ -361,35 +322,7 @@ export function ControllerSettingsDialog({
                       <p>{controllerRuntimeDescription(runtimeLabel)}。体验层与运行时保持分离，后续适配器复用同一套会话界面。</p>
                     </div>
                   </section>
-                  <section className="settings-group">
-                    <div className="settings-group-heading">
-                      <div><h4>DSH 运行时</h4><p>密钥只写入服务端私有 DSH 凭据库，绝不会返回浏览器。</p></div>
-                      <span className={`settings-status ${providerStatus?.configured ? 'ready' : 'missing'}`}>
-                        {providerLoading ? '正在检查…' : providerStatus?.configured ? '已配置' : '需要配置'}
-                      </span>
-                    </div>
-                    <form className="settings-provider-form" onSubmit={configure} autoComplete="off">
-                      <label htmlFor="settings-dsh-key">DeepSeek API 密钥</label>
-                      <div className="settings-inline-form">
-                        <input
-                          id="settings-dsh-key"
-                          type="password"
-                          autoComplete="off"
-                          spellCheck={false}
-                          maxLength={4096}
-                          placeholder={providerStatus?.configured ? '输入新密钥以替换' : 'sk-…'}
-                          value={apiKey}
-                          onChange={(event) => setAPIKey(event.target.value)}
-                        />
-                        <button className="button primary" type="submit" disabled={configuring || !apiKey.trim() || providerStatus?.writable === false}>
-                          {configuring ? '正在保存…' : providerStatus?.configured ? '替换密钥' : '保存密钥'}
-                        </button>
-                      </div>
-                      {providerStatus?.writable === false && <p className="settings-description">当前密钥由只读运行环境提供，无法从控制端替换。</p>}
-                      {providerError && <div className="notice error compact" role="alert">{providerError}</div>}
-                      {providerNotice && <div className="notice success compact" role="status">{providerNotice}</div>}
-                    </form>
-                  </section>
+                  <RuntimeProvidersSettings />
                   <section className="settings-group">
                     <h4>新会话默认权限</h4>
                     <p className="settings-description">只影响以后创建的会话；当前会话在输入框旁单独设置。</p>

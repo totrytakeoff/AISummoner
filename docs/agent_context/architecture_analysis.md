@@ -20,8 +20,10 @@ same Remote execution boundary.
 
 The strongest reusable assets are the trust chain, owner-scoped persistence,
 Tunnel/SSH lifecycle, Terminal data plane, Qt Remote GUI and the source-aligned
-DSH presentation baseline. The primary debt is now the minimal one-Turn Adapter
-interface and incomplete Runtime capabilities rather than Controller chrome.
+DSH presentation baseline. DSH now also exposes native redacted Provider
+configuration and current-Session model selection through optional common
+capabilities. The primary debt is the remaining one-Turn lifecycle and
+incomplete Runtime capabilities rather than Controller chrome.
 
 ## Alpha Target Shape
 
@@ -65,6 +67,9 @@ Remote Core Daemon
 - Use an ordered normalized Session Log to drive every Runtime through one UI.
 - Split Agent integration into Runtime Adapter, Capability Descriptor, Remote
   Capability Bridge, and Provider/Tool presentation.
+- Keep Runtime identity separate from its model-provider identity; project
+  Provider Settings and current-Session model selection through optional
+  capabilities, with Runtime-native state as the fact source.
 - Use the pinned DSH Web UX as the canonical Controller experience and first
   rich Runtime reference without importing its Host, database, credentials or
   local execution authority.
@@ -98,6 +103,14 @@ bounded streams, cancellation, joined shutdown, secret injection and per-Session
 mapping. Runtime crashes must become safe Session errors rather than Server
 process failure.
 
+### Runtime Configuration And Models
+
+Provider configuration is Host-level and redacted; model selection is scoped to
+one Runtime Session. DSH implements both through native revisioned RPC and
+write-only credentials. Future file-backed adapters must preserve unknown
+fields, reject malformed/symlinked input, atomically replace private files and
+rollback multi-file commits as specified by ADR-0006.
+
 ### Remote Capability Plane
 
 `remote_exec` remains the first tool, but native coding workflows need bounded
@@ -118,7 +131,8 @@ the daemon. GUI exit and daemon disconnect are distinct state transitions.
    the current Agent/Terminal behavior as reusable surfaces. **Completed.**
 3. Establish the source-aligned DSH presentation/Settings baseline and the real
    DSH Runtime Adapter. **First end-to-end DSH slice completed.** Event v2,
-   capabilities and richer native actions remain incremental work.
+   lifecycle capabilities and richer native actions remain incremental work;
+   native Provider/model configuration is complete.
 4. Enrich OpenCode, then add Codex and Claude using the same contracts.
 5. Add structured file/diff and Desktop capabilities only through separate ADRs.
 

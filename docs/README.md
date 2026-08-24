@@ -30,6 +30,7 @@
 - [ADR-0003：统一 Agent/Web 适配层](decisions/ADR-0003-agent-adapter-ui.md)
 - [ADR-0004：Alpha 双客户端与 Runtime 架构](decisions/ADR-0004-alpha-clients-and-agent-runtime.md)
 - [ADR-0005：DSH-first Controller 体验](decisions/ADR-0005-dsh-first-controller-experience.md)
+- [ADR-0006：Runtime 供应商配置与会话模型边界](decisions/ADR-0006-runtime-provider-model-configuration.md)
 
 ## 设计文档
 

@@ -25,6 +25,7 @@ const (
 	maxJSONBodyBytes               = 6*agent.MaxMessageBytes + 1024
 	maxDeepSeekConfigJSONBodyBytes = 16 * 1024
 	maxDSHConfigJSONBodyBytes      = 16 * 1024
+	maxRuntimeConfigJSONBodyBytes  = 512 * 1024
 	keepaliveInterval              = 15 * time.Second
 	defaultWriteWait               = 10 * time.Second
 )
@@ -43,6 +44,21 @@ type AgentService interface {
 	StartTurn(context.Context, string, string, string) (store.AgentMessage, error)
 	Decide(context.Context, string, string, string) (store.ToolCall, error)
 	Subscribe(context.Context, string, string) (<-chan agent.Event, func(), error)
+}
+
+// RuntimeConfigurationService is optional because not every Agent adapter has
+// a Browser-configurable provider directory.
+type RuntimeConfigurationService interface {
+	RuntimeProviderDirectory(context.Context, string) (agent.RuntimeProviderDirectory, error)
+	ConfigureRuntimeProvider(context.Context, string, agent.RuntimeProviderMutation) error
+	RemoveRuntimeProvider(context.Context, string, string, int64) error
+}
+
+// SessionModelService is optional because direct/test adapters can own one
+// fixed model without exposing a native per-Session selector.
+type SessionModelService interface {
+	SessionModels(context.Context, string, string) (agent.ModelDirectory, error)
+	SelectSessionModel(context.Context, string, string, agent.ModelSelection) (agent.ModelSelection, error)
 }
 
 // ProviderConfigurator changes only the Server-side provider registry. The
@@ -69,6 +85,8 @@ type Options struct {
 	Agent                AgentService
 	ProviderConfigurator ProviderConfigurator
 	DSHConfigurator      DSHCredentialConfigurator
+	RuntimeConfiguration RuntimeConfigurationService
+	SessionModels        SessionModelService
 	AllowedOrigin        string
 	Logger               *slog.Logger
 	Now                  func() time.Time
@@ -81,6 +99,8 @@ type API struct {
 	agent                AgentService
 	providerConfigurator ProviderConfigurator
 	dshConfigurator      DSHCredentialConfigurator
+	runtimeConfiguration RuntimeConfigurationService
+	sessionModels        SessionModelService
 	allowedOrigin        string
 	logger               *slog.Logger
 	now                  func() time.Time
@@ -104,11 +124,20 @@ func New(options Options) (*API, error) {
 	if options.WriteTimeout <= 0 {
 		options.WriteTimeout = defaultWriteWait
 	}
+	runtimeConfiguration := options.RuntimeConfiguration
+	if runtimeConfiguration == nil {
+		runtimeConfiguration, _ = options.Agent.(RuntimeConfigurationService)
+	}
+	sessionModels := options.SessionModels
+	if sessionModels == nil {
+		sessionModels, _ = options.Agent.(SessionModelService)
+	}
 	return &API{
 		auth: options.Auth, agent: options.Agent, providerConfigurator: options.ProviderConfigurator,
-		dshConfigurator: options.DSHConfigurator,
-		allowedOrigin:   options.AllowedOrigin,
-		logger:          options.Logger, now: options.Now, keepalive: options.Keepalive, writeTimeout: options.WriteTimeout,
+		dshConfigurator:      options.DSHConfigurator,
+		runtimeConfiguration: runtimeConfiguration, sessionModels: sessionModels,
+		allowedOrigin: options.AllowedOrigin,
+		logger:        options.Logger, now: options.Now, keepalive: options.Keepalive, writeTimeout: options.WriteTimeout,
 	}, nil
 }
 
@@ -118,7 +147,7 @@ func (api *API) Handler() http.Handler {
 
 func (api *API) route(writer http.ResponseWriter, request *http.Request) {
 	path := request.URL.Path
-	if (request.Method == http.MethodPost || request.Method == http.MethodPatch || request.Method == http.MethodDelete) && !api.sameOrigin(request) {
+	if (request.Method == http.MethodPost || request.Method == http.MethodPut || request.Method == http.MethodPatch || request.Method == http.MethodDelete) && !api.sameOrigin(request) {
 		api.writeError(writer, request, http.StatusForbidden, "ORIGIN_FORBIDDEN", "request origin is not allowed")
 		return
 	}
@@ -127,6 +156,24 @@ func (api *API) route(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	switch {
+	case strings.HasPrefix(path, "/api/v1/agent-runtimes/"):
+		remainder := strings.TrimPrefix(path, "/api/v1/agent-runtimes/")
+		parts := strings.Split(remainder, "/")
+		if api.runtimeConfiguration == nil || len(parts) < 2 || parts[1] != "providers" ||
+			!validRuntimeID(parts[0]) {
+			api.writeError(writer, authenticated, http.StatusNotFound, "NOT_FOUND", "resource not found")
+			return
+		}
+		switch {
+		case len(parts) == 2 && request.Method == http.MethodGet:
+			api.runtimeProviders(writer, authenticated, parts[0])
+		case len(parts) == 3 && validProviderID(parts[2]) && request.Method == http.MethodPut:
+			api.configureRuntimeProvider(writer, authenticated, parts[0], parts[2])
+		case len(parts) == 3 && validProviderID(parts[2]) && request.Method == http.MethodDelete:
+			api.removeRuntimeProvider(writer, authenticated, parts[0], parts[2])
+		default:
+			api.writeError(writer, authenticated, http.StatusNotFound, "NOT_FOUND", "resource not found")
+		}
 	case path == "/api/v1/agent-provider/dsh" && (request.Method == http.MethodGet || request.Method == http.MethodPost):
 		if api.dshConfigurator == nil {
 			api.writeError(writer, authenticated, http.StatusNotFound, "NOT_FOUND", "resource not found")
@@ -179,6 +226,19 @@ func (api *API) route(writer http.ResponseWriter, request *http.Request) {
 		}
 	case strings.HasPrefix(path, "/api/v1/agent-sessions/"):
 		remainder := strings.TrimPrefix(path, "/api/v1/agent-sessions/")
+		if strings.HasSuffix(remainder, "/models") && (request.Method == http.MethodGet || request.Method == http.MethodPatch) {
+			sessionID := strings.TrimSuffix(remainder, "/models")
+			if api.sessionModels == nil || !validPathID(sessionID) || strings.Contains(sessionID, "/") {
+				api.writeError(writer, authenticated, http.StatusNotFound, "NOT_FOUND", "resource not found")
+				return
+			}
+			if request.Method == http.MethodGet {
+				api.getSessionModels(writer, authenticated, user, sessionID)
+			} else {
+				api.selectSessionModel(writer, authenticated, user, sessionID)
+			}
+			return
+		}
 		if strings.HasSuffix(remainder, "/messages") && request.Method == http.MethodPost {
 			sessionID := strings.TrimSuffix(remainder, "/messages")
 			if !validPathID(sessionID) || strings.Contains(sessionID, "/") {
@@ -230,6 +290,75 @@ type deepSeekConfigurationRequest struct {
 
 type dshConfigurationRequest struct {
 	APIKey string `json:"api_key"`
+}
+
+type runtimeProviderModelRequest struct {
+	ID            string `json:"id"`
+	Name          string `json:"name,omitempty"`
+	ContextWindow int64  `json:"context_window,omitempty"`
+	MaxTokens     int64  `json:"max_tokens,omitempty"`
+}
+
+type runtimeProviderMutationRequest struct {
+	ExpectedRevision *int64                         `json:"expected_revision"`
+	DisplayName      string                         `json:"display_name,omitempty"`
+	BaseURL          string                         `json:"base_url,omitempty"`
+	API              string                         `json:"api,omitempty"`
+	Models           *[]runtimeProviderModelRequest `json:"models,omitempty"`
+	ModelsOverridden bool                           `json:"models_overridden"`
+	APIKey           string                         `json:"api_key,omitempty"`
+}
+
+type runtimeProviderRemovalRequest struct {
+	ExpectedRevision *int64 `json:"expected_revision"`
+}
+
+func (api *API) runtimeProviders(writer http.ResponseWriter, request *http.Request, runtime string) {
+	directory, err := api.runtimeConfiguration.RuntimeProviderDirectory(request.Context(), runtime)
+	if api.writeServiceError(writer, request, err) {
+		return
+	}
+	api.writeJSON(writer, http.StatusOK, runtimeProviderDirectoryResponse(directory))
+}
+
+func (api *API) configureRuntimeProvider(writer http.ResponseWriter, request *http.Request, runtime, provider string) {
+	var body runtimeProviderMutationRequest
+	if err := decodeJSONWithLimit(writer, request, &body, maxRuntimeConfigJSONBodyBytes); err != nil ||
+		body.ExpectedRevision == nil || (body.ModelsOverridden && body.Models == nil) || (!body.ModelsOverridden && body.Models != nil) {
+		api.writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		return
+	}
+	mutation := agent.RuntimeProviderMutation{
+		Provider: provider, ExpectedRevision: *body.ExpectedRevision,
+		DisplayName: body.DisplayName, BaseURL: body.BaseURL, API: body.API,
+		ModelsOverridden: body.ModelsOverridden, APIKey: body.APIKey,
+	}
+	if body.Models != nil {
+		mutation.Models = make([]agent.RuntimeProviderModel, 0, len(*body.Models))
+		for _, model := range *body.Models {
+			mutation.Models = append(mutation.Models, agent.RuntimeProviderModel{
+				ID: model.ID, Name: model.Name, ContextWindow: model.ContextWindow, MaxTokens: model.MaxTokens,
+			})
+		}
+	}
+	if err := api.runtimeConfiguration.ConfigureRuntimeProvider(request.Context(), runtime, mutation); api.writeServiceError(writer, request, err) {
+		return
+	}
+	writer.Header().Set("Cache-Control", "no-store")
+	writer.WriteHeader(http.StatusNoContent)
+}
+
+func (api *API) removeRuntimeProvider(writer http.ResponseWriter, request *http.Request, runtime, provider string) {
+	var body runtimeProviderRemovalRequest
+	if err := decodeJSONWithLimit(writer, request, &body, maxRuntimeConfigJSONBodyBytes); err != nil || body.ExpectedRevision == nil {
+		api.writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		return
+	}
+	if err := api.runtimeConfiguration.RemoveRuntimeProvider(request.Context(), runtime, provider, *body.ExpectedRevision); api.writeServiceError(writer, request, err) {
+		return
+	}
+	writer.Header().Set("Cache-Control", "no-store")
+	writer.WriteHeader(http.StatusNoContent)
 }
 
 func (api *API) configureDSH(writer http.ResponseWriter, request *http.Request) {
@@ -385,6 +514,35 @@ func (api *API) getSession(writer http.ResponseWriter, request *http.Request, us
 	api.writeJSON(writer, http.StatusOK, snapshotResponse(snapshot))
 }
 
+type sessionModelSelectionRequest struct {
+	Provider        string `json:"provider"`
+	Model           string `json:"model"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+}
+
+func (api *API) getSessionModels(writer http.ResponseWriter, request *http.Request, user store.User, sessionID string) {
+	directory, err := api.sessionModels.SessionModels(request.Context(), user.ID, sessionID)
+	if api.writeServiceError(writer, request, err) {
+		return
+	}
+	api.writeJSON(writer, http.StatusOK, modelDirectoryResponse(directory))
+}
+
+func (api *API) selectSessionModel(writer http.ResponseWriter, request *http.Request, user store.User, sessionID string) {
+	var body sessionModelSelectionRequest
+	if err := decodeJSONWithLimit(writer, request, &body, maxRuntimeConfigJSONBodyBytes); err != nil {
+		api.writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "invalid request body")
+		return
+	}
+	selected, err := api.sessionModels.SelectSessionModel(request.Context(), user.ID, sessionID, agent.ModelSelection{
+		Provider: body.Provider, Model: body.Model, ReasoningEffort: body.ReasoningEffort,
+	})
+	if api.writeServiceError(writer, request, err) {
+		return
+	}
+	api.writeJSON(writer, http.StatusOK, map[string]any{"selected": modelSelectionResponse(selected)})
+}
+
 type messageRequest struct {
 	Content string `json:"content"`
 }
@@ -497,6 +655,10 @@ func (api *API) writeServiceError(writer http.ResponseWriter, request *http.Requ
 		api.writeError(writer, request, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "agent provider is unavailable")
 	case errors.As(err, &adapterError) && adapterError.Code == "credential_required":
 		api.writeError(writer, request, http.StatusConflict, "PROVIDER_CREDENTIAL_REQUIRED", "agent provider credential is required")
+	case errors.As(err, &adapterError) && adapterError.Code == "configuration_conflict":
+		api.writeError(writer, request, http.StatusConflict, "CONFIGURATION_CONFLICT", "provider configuration changed; refresh and retry")
+	case errors.As(err, &adapterError) && adapterError.Code == "model_unavailable":
+		api.writeError(writer, request, http.StatusConflict, "MODEL_UNAVAILABLE", "the selected model is unavailable")
 	case errors.As(err, &adapterError):
 		api.writeError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "provider configuration was rejected")
 	default:
@@ -592,3 +754,23 @@ func (api *API) writeJSON(writer http.ResponseWriter, status int, value any) {
 }
 
 func validPathID(value string) bool { return len(value) >= 5 && len(value) <= 128 }
+
+func validRuntimeID(value string) bool {
+	return len(value) > 0 && len(value) <= agent.MaxRuntimeIDBytes && validRouteID(value)
+}
+
+func validProviderID(value string) bool {
+	return len(value) > 0 && len(value) <= agent.MaxProviderIDBytes && validRouteID(value)
+}
+
+func validRouteID(value string) bool {
+	for index, character := range value {
+		if index == 0 && (character < 'a' || character > 'z') {
+			return false
+		}
+		if index > 0 && !((character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || character == '-') {
+			return false
+		}
+	}
+	return true
+}

@@ -41,6 +41,78 @@ type providerConfiguratorProbe struct {
 	err   error
 }
 
+type runtimeConfigurationProbe struct {
+	mu             sync.Mutex
+	directory      agent.RuntimeProviderDirectory
+	directoryErr   error
+	runtime        string
+	mutation       agent.RuntimeProviderMutation
+	configureErr   error
+	configureCalls int
+	removed        string
+	removeRevision int64
+	removeErr      error
+	removeCalls    int
+}
+
+func (probe *runtimeConfigurationProbe) RuntimeProviderDirectory(_ context.Context, runtime string) (agent.RuntimeProviderDirectory, error) {
+	probe.mu.Lock()
+	defer probe.mu.Unlock()
+	probe.runtime = runtime
+	return probe.directory, probe.directoryErr
+}
+
+func (probe *runtimeConfigurationProbe) ConfigureRuntimeProvider(_ context.Context, runtime string, mutation agent.RuntimeProviderMutation) error {
+	probe.mu.Lock()
+	defer probe.mu.Unlock()
+	probe.runtime = runtime
+	probe.mutation = mutation
+	probe.configureCalls++
+	return probe.configureErr
+}
+
+func (probe *runtimeConfigurationProbe) RemoveRuntimeProvider(_ context.Context, runtime, provider string, revision int64) error {
+	probe.mu.Lock()
+	defer probe.mu.Unlock()
+	probe.runtime = runtime
+	probe.removed = provider
+	probe.removeRevision = revision
+	probe.removeCalls++
+	return probe.removeErr
+}
+
+type sessionModelsProbe struct {
+	mu           sync.Mutex
+	directory    agent.ModelDirectory
+	directoryErr error
+	selected     agent.ModelSelection
+	selectErr    error
+	ownerID      string
+	sessionID    string
+	selectCalls  int
+}
+
+func (probe *sessionModelsProbe) SessionModels(_ context.Context, ownerID, sessionID string) (agent.ModelDirectory, error) {
+	probe.mu.Lock()
+	defer probe.mu.Unlock()
+	probe.ownerID = ownerID
+	probe.sessionID = sessionID
+	return probe.directory, probe.directoryErr
+}
+
+func (probe *sessionModelsProbe) SelectSessionModel(_ context.Context, ownerID, sessionID string, selection agent.ModelSelection) (agent.ModelSelection, error) {
+	probe.mu.Lock()
+	defer probe.mu.Unlock()
+	probe.ownerID = ownerID
+	probe.sessionID = sessionID
+	probe.selected = selection
+	probe.selectCalls++
+	if probe.selectErr != nil {
+		return agent.ModelSelection{}, probe.selectErr
+	}
+	return selection, nil
+}
+
 func (probe *providerConfiguratorProbe) ConfigureDeepSeek(_ context.Context, key, model string) error {
 	probe.mu.Lock()
 	defer probe.mu.Unlock()
@@ -340,6 +412,151 @@ func TestDSHConfigurationRequiresAuthOriginBoundsAndNeverLeaksCredential(t *test
 
 	missing := fixture.request(http.MethodPost, "/api/v1/agent-provider/dsh", `{}`, fixture.cookie, true)
 	assertError(t, missing, http.StatusNotFound, "NOT_FOUND")
+}
+
+func TestRuntimeProviderDirectoryAndMutationsAreBoundedRedactedAndSameOrigin(t *testing.T) {
+	fixture := newAPIFixture(t)
+	secret := "sk-runtime-write-only-sentinel"
+	credential := agent.CredentialStatus{Configured: true, Writable: true}
+	probe := &runtimeConfigurationProbe{directory: agent.RuntimeProviderDirectory{
+		Runtime: "dsh", DisplayName: "DeepSeek Harness", Writable: true,
+		CustomProviderRevision: 17,
+		Protocols:              []string{"openai-completions", "anthropic-messages"},
+		Providers: []agent.RuntimeProviderProfile{{
+			ID: "deepseek-official", DisplayName: "DeepSeek", Family: "llm-deepseek",
+			Active: true, Configured: true, Revision: 9, BaseURL: "https://api.deepseek.com",
+			Models:     []agent.RuntimeProviderModel{{ID: "deepseek-chat", Name: "DeepSeek Chat"}},
+			Credential: &credential,
+		}},
+	}}
+	var logs bytes.Buffer
+	api, err := New(Options{
+		Auth: auth.NewService(fixture.store), Agent: fixture.service, RuntimeConfiguration: probe,
+		AllowedOrigin: apiTestOrigin, Logger: slog.New(slog.NewTextHandler(&logs, nil)),
+		Now: func() time.Time { return fixture.now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := api.Handler()
+	request := func(method, path, body string, cookie *http.Cookie, origin bool) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if origin {
+			req.Header.Set("Origin", apiTestOrigin)
+		}
+		if cookie != nil {
+			req.AddCookie(cookie)
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, req)
+		return response
+	}
+
+	assertError(t, request(http.MethodGet, "/api/v1/agent-runtimes/dsh/providers", "", nil, false), http.StatusUnauthorized, "UNAUTHENTICATED")
+	directory := request(http.MethodGet, "/api/v1/agent-runtimes/dsh/providers", "", fixture.cookie, false)
+	if directory.Code != http.StatusOK || directory.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("provider directory status=%d cache=%q body=%s", directory.Code, directory.Header().Get("Cache-Control"), directory.Body.String())
+	}
+	if !strings.Contains(directory.Body.String(), `"custom_provider_revision":17`) ||
+		!strings.Contains(directory.Body.String(), `"credential":{"configured":true,"writable":true}`) ||
+		strings.Contains(directory.Body.String(), secret) || strings.Contains(directory.Body.String(), "source") ||
+		strings.Contains(directory.Body.String(), "credential_ref") {
+		t.Fatalf("provider directory exposed private or incomplete data: %s", directory.Body.String())
+	}
+
+	path := "/api/v1/agent-runtimes/dsh/providers/deepseek-official"
+	assertError(t, request(http.MethodPut, path, `{}`, fixture.cookie, false), http.StatusForbidden, "ORIGIN_FORBIDDEN")
+	assertError(t, request(http.MethodPut, path, `{"expected_revision":9,"extra":true}`, fixture.cookie, true), http.StatusBadRequest, "INVALID_REQUEST")
+	if probe.configureCalls != 0 {
+		t.Fatalf("invalid provider mutations reached service %d times", probe.configureCalls)
+	}
+	body, _ := json.Marshal(map[string]any{
+		"expected_revision": 9, "base_url": "https://gateway.example/v1", "models_overridden": true,
+		"models":  []map[string]any{{"id": "deepseek-chat", "name": "DeepSeek Chat", "context_window": 65536}},
+		"api_key": secret,
+	})
+	configured := request(http.MethodPut, path, string(body), fixture.cookie, true)
+	if configured.Code != http.StatusNoContent || configured.Body.Len() != 0 {
+		t.Fatalf("provider mutation status=%d body=%s", configured.Code, configured.Body.String())
+	}
+	if probe.configureCalls != 1 || probe.runtime != "dsh" || probe.mutation.Provider != "deepseek-official" ||
+		probe.mutation.ExpectedRevision != 9 || probe.mutation.APIKey != secret || !probe.mutation.ModelsOverridden ||
+		len(probe.mutation.Models) != 1 || probe.mutation.Models[0].ID != "deepseek-chat" {
+		t.Fatalf("unexpected provider mutation: calls=%d runtime=%q mutation=%#v", probe.configureCalls, probe.runtime, probe.mutation)
+	}
+	if strings.Contains(configured.Body.String(), secret) || strings.Contains(logs.String(), secret) {
+		t.Fatal("provider mutation leaked its write-only credential")
+	}
+
+	removed := request(http.MethodDelete, path, `{"expected_revision":9}`, fixture.cookie, true)
+	if removed.Code != http.StatusNoContent || probe.removeCalls != 1 || probe.removed != "deepseek-official" || probe.removeRevision != 9 {
+		t.Fatalf("provider removal status=%d calls=%d provider=%q revision=%d body=%s", removed.Code, probe.removeCalls, probe.removed, probe.removeRevision, removed.Body.String())
+	}
+	assertError(t, request(http.MethodGet, "/api/v1/agent-runtimes/DSH/providers", "", fixture.cookie, false), http.StatusNotFound, "NOT_FOUND")
+}
+
+func TestSessionModelDirectoryAndSelectionUseAuthenticatedOwnerAndSameOrigin(t *testing.T) {
+	fixture := newAPIFixture(t)
+	credential := agent.CredentialStatus{Configured: false, Writable: true}
+	probe := &sessionModelsProbe{directory: agent.ModelDirectory{
+		Current:  agent.ModelSelection{Provider: "deepseek-official", Model: "deepseek-reasoner", ReasoningEffort: "high"},
+		Routable: true, CurrentCredential: &credential,
+		Groups: []agent.ModelProviderGroup{{
+			ID: "deepseek-official", Name: "DeepSeek",
+			Models: []agent.RuntimeModel{{
+				ID: "deepseek-reasoner", Name: "DeepSeek Reasoner",
+				ReasoningEfforts: []agent.ModelReasoningEffort{{ID: "high", Name: "高"}}, DefaultReasoningEffort: "high",
+			}},
+		}},
+	}}
+	api, err := New(Options{
+		Auth: auth.NewService(fixture.store), Agent: fixture.service, SessionModels: probe,
+		AllowedOrigin: apiTestOrigin, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Now: func() time.Time { return fixture.now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := api.Handler()
+	request := func(method, body string, cookie *http.Cookie, origin bool) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, "/api/v1/agent-sessions/ags_models/models", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if origin {
+			req.Header.Set("Origin", apiTestOrigin)
+		}
+		if cookie != nil {
+			req.AddCookie(cookie)
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, req)
+		return response
+	}
+
+	assertError(t, request(http.MethodGet, "", nil, false), http.StatusUnauthorized, "UNAUTHENTICATED")
+	directory := request(http.MethodGet, "", fixture.cookie, false)
+	if directory.Code != http.StatusOK || !strings.Contains(directory.Body.String(), `"reasoning_effort":"high"`) ||
+		!strings.Contains(directory.Body.String(), `"current_credential":{"configured":false,"writable":true}`) ||
+		strings.Contains(directory.Body.String(), "source") {
+		t.Fatalf("unexpected model directory status=%d body=%s", directory.Code, directory.Body.String())
+	}
+	if probe.ownerID != fixture.ownerID || probe.sessionID != "ags_models" {
+		t.Fatalf("model directory owner/session mismatch owner=%q session=%q", probe.ownerID, probe.sessionID)
+	}
+
+	assertError(t, request(http.MethodPatch, `{}`, fixture.cookie, false), http.StatusForbidden, "ORIGIN_FORBIDDEN")
+	assertError(t, request(http.MethodPatch, `{"provider":"deepseek-official","model":"deepseek-chat","extra":true}`, fixture.cookie, true), http.StatusBadRequest, "INVALID_REQUEST")
+	selected := request(http.MethodPatch, `{"provider":"deepseek-official","model":"deepseek-chat","reasoning_effort":"medium"}`, fixture.cookie, true)
+	if selected.Code != http.StatusOK || !strings.Contains(selected.Body.String(), `"selected":{"provider":"deepseek-official","model":"deepseek-chat","reasoning_effort":"medium"}`) {
+		t.Fatalf("model selection status=%d body=%s", selected.Code, selected.Body.String())
+	}
+	if probe.selectCalls != 1 || probe.ownerID != fixture.ownerID || probe.sessionID != "ags_models" ||
+		probe.selected.Provider != "deepseek-official" || probe.selected.Model != "deepseek-chat" || probe.selected.ReasoningEffort != "medium" {
+		t.Fatalf("unexpected model selection: calls=%d owner=%q session=%q selected=%#v", probe.selectCalls, probe.ownerID, probe.sessionID, probe.selected)
+	}
+
+	probe.directoryErr = agent.ErrNotFound
+	assertError(t, request(http.MethodGet, "", fixture.cookie, false), http.StatusNotFound, "NOT_FOUND")
 }
 
 func TestAPISessionPermissionDefaultsArchiveRestoreAndDelete(t *testing.T) {

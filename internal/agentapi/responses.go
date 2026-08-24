@@ -3,8 +3,126 @@ package agentapi
 import (
 	"time"
 
+	"github.com/aisummoner/aisummoner/internal/agent"
 	"github.com/aisummoner/aisummoner/internal/store"
 )
+
+type credentialStatusJSON struct {
+	Configured bool `json:"configured"`
+	Writable   bool `json:"writable"`
+}
+
+type runtimeProviderModelJSON struct {
+	ID            string `json:"id"`
+	Name          string `json:"name,omitempty"`
+	ContextWindow int64  `json:"context_window,omitempty"`
+	MaxTokens     int64  `json:"max_tokens,omitempty"`
+}
+
+type runtimeProviderProfileJSON struct {
+	ID               string                     `json:"id"`
+	DisplayName      string                     `json:"display_name"`
+	Family           string                     `json:"family"`
+	Active           bool                       `json:"active"`
+	Configured       bool                       `json:"configured"`
+	Custom           bool                       `json:"custom"`
+	Removable        bool                       `json:"removable"`
+	Revision         int64                      `json:"revision"`
+	BaseURL          string                     `json:"base_url,omitempty"`
+	API              string                     `json:"api,omitempty"`
+	Models           []runtimeProviderModelJSON `json:"models"`
+	ModelsOverridden bool                       `json:"models_overridden"`
+	Credential       *credentialStatusJSON      `json:"credential,omitempty"`
+}
+
+func runtimeProviderDirectoryResponse(directory agent.RuntimeProviderDirectory) map[string]any {
+	providers := make([]runtimeProviderProfileJSON, 0, len(directory.Providers))
+	for _, provider := range directory.Providers {
+		models := make([]runtimeProviderModelJSON, 0, len(provider.Models))
+		for _, model := range provider.Models {
+			models = append(models, runtimeProviderModelJSON{
+				ID: model.ID, Name: model.Name, ContextWindow: model.ContextWindow, MaxTokens: model.MaxTokens,
+			})
+		}
+		var credential *credentialStatusJSON
+		if provider.Credential != nil {
+			credential = &credentialStatusJSON{Configured: provider.Credential.Configured, Writable: provider.Credential.Writable}
+		}
+		providers = append(providers, runtimeProviderProfileJSON{
+			ID: provider.ID, DisplayName: provider.DisplayName, Family: provider.Family,
+			Active: provider.Active, Configured: provider.Configured, Custom: provider.Custom,
+			Removable: provider.Removable, Revision: provider.Revision,
+			BaseURL: provider.BaseURL, API: provider.API, Models: models,
+			ModelsOverridden: provider.ModelsOverridden, Credential: credential,
+		})
+	}
+	return map[string]any{"runtime": map[string]any{
+		"id": directory.Runtime, "display_name": directory.DisplayName,
+		"writable": directory.Writable, "custom_provider_revision": directory.CustomProviderRevision,
+		"protocols": directory.Protocols, "providers": providers,
+	}}
+}
+
+type modelSelectionJSON struct {
+	Provider        string `json:"provider"`
+	Model           string `json:"model"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+}
+
+type modelReasoningEffortJSON struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+type runtimeModelJSON struct {
+	ID                     string                     `json:"id"`
+	Name                   string                     `json:"name"`
+	Description            string                     `json:"description,omitempty"`
+	ContextWindow          int64                      `json:"context_window,omitempty"`
+	MaxTokens              int64                      `json:"max_tokens,omitempty"`
+	ReasoningEfforts       []modelReasoningEffortJSON `json:"reasoning_efforts"`
+	DefaultReasoningEffort string                     `json:"default_reasoning_effort,omitempty"`
+}
+
+func modelSelectionResponse(selection agent.ModelSelection) modelSelectionJSON {
+	return modelSelectionJSON{
+		Provider: selection.Provider, Model: selection.Model, ReasoningEffort: selection.ReasoningEffort,
+	}
+}
+
+func modelDirectoryResponse(directory agent.ModelDirectory) map[string]any {
+	groups := make([]map[string]any, 0, len(directory.Groups))
+	for _, group := range directory.Groups {
+		models := make([]runtimeModelJSON, 0, len(group.Models))
+		for _, model := range group.Models {
+			efforts := make([]modelReasoningEffortJSON, 0, len(model.ReasoningEfforts))
+			for _, effort := range model.ReasoningEfforts {
+				efforts = append(efforts, modelReasoningEffortJSON{ID: effort.ID, Name: effort.Name, Description: effort.Description})
+			}
+			models = append(models, runtimeModelJSON{
+				ID: model.ID, Name: model.Name, Description: model.Description,
+				ContextWindow: model.ContextWindow, MaxTokens: model.MaxTokens,
+				ReasoningEfforts: efforts, DefaultReasoningEffort: model.DefaultReasoningEffort,
+			})
+		}
+		groups = append(groups, map[string]any{"id": group.ID, "name": group.Name, "models": models})
+	}
+	failures := make([]map[string]string, 0, len(directory.Failures))
+	for _, failure := range directory.Failures {
+		failures = append(failures, map[string]string{"id": failure.ID, "name": failure.Name, "message": failure.Message})
+	}
+	response := map[string]any{
+		"current": modelSelectionResponse(directory.Current), "routable": directory.Routable,
+		"groups": groups, "failures": failures,
+	}
+	if directory.CurrentCredential != nil {
+		response["current_credential"] = credentialStatusJSON{
+			Configured: directory.CurrentCredential.Configured, Writable: directory.CurrentCredential.Writable,
+		}
+	}
+	return response
+}
 
 type sessionJSON struct {
 	ID                string  `json:"id"`

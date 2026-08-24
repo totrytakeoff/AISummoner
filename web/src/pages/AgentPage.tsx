@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { APIError, api } from '../api/client'
-import type { AgentSession, ApprovalMode, DSHCredentialStatus } from '../api/types'
+import type { AgentSession, ApprovalMode, ModelDirectory, ModelSelection } from '../api/types'
 import type { ToolDecision } from '../api/types'
 import { resolveAgentProviderPresentation } from '../agent/adapters'
 import { initialAgentViewState, projectAgentSnapshot } from '../agent/events'
@@ -46,8 +46,11 @@ export function AgentPage({
   const [sessionError, setSessionError] = useState<string | null>(null)
   const [prompt, setPrompt] = useState('')
   const [sending, setSending] = useState(false)
-  const [credentialStatus, setCredentialStatus] = useState<DSHCredentialStatus | null>(null)
-  const [credentialError, setCredentialError] = useState<string | null>(null)
+  const [modelDirectory, setModelDirectory] = useState<ModelDirectory | null>(null)
+  const [modelLoading, setModelLoading] = useState(false)
+  const [modelError, setModelError] = useState<string | null>(null)
+  const [modelOpen, setModelOpen] = useState(false)
+  const [modelChanging, setModelChanging] = useState(false)
   const [credentialFailureSuppressed, setCredentialFailureSuppressed] = useState(false)
   const [permissionOpen, setPermissionOpen] = useState(false)
   const [permissionChanging, setPermissionChanging] = useState(false)
@@ -65,6 +68,13 @@ export function AgentPage({
     markDecision,
   } = useAgentEvents(session?.id ?? null, scopedSession?.initialView ?? initialAgentViewState)
   const provider = resolveAgentProviderPresentation(session?.provider)
+  const currentSelection = modelDirectory?.current
+  const currentProviderGroup = modelDirectory?.groups.find((group) => group.id === currentSelection?.provider)
+  const currentModel = currentProviderGroup?.models.find((model) => model.id === currentSelection?.model)
+  const currentCredential = modelDirectory?.current_credential
+  const modelUnavailable = session?.provider === 'dsh' && (
+    modelLoading || modelError !== null || modelDirectory === null || !modelDirectory.routable || currentCredential?.configured === false
+  )
   const pendingTool = useMemo(() => {
     for (let index = state.timeline.length - 1; index >= 0; index--) {
       const item = state.timeline[index]
@@ -87,40 +97,50 @@ export function AgentPage({
     setSessionError(null)
     setPrompt('')
     setSending(false)
-    setCredentialStatus(null)
-    setCredentialError(null)
+    setModelDirectory(null)
+    setModelLoading(false)
+    setModelError(null)
+    setModelOpen(false)
+    setModelChanging(false)
     setCredentialFailureSuppressed(false)
     setPermissionOpen(false)
     setConfirmFullAccess(false)
   }, [deviceId])
 
   useEffect(() => {
-    setCredentialStatus(null)
-    setCredentialError(null)
+    setModelDirectory(null)
+    setModelError(null)
     setCredentialFailureSuppressed(false)
     if (session?.provider !== 'dsh') {
+      setModelLoading(false)
       return
     }
+    const sessionID = session.id
     let current = true
-    async function refreshCredential() {
+    async function refreshModels() {
+      setModelLoading(true)
       try {
-        const next = await api.dshCredentialStatus()
+        const next = await api.agentSessionModels(sessionID)
         if (!current) return
-        setCredentialStatus(next)
-        setCredentialError(null)
-        if (!next.configured) setCredentialFailureSuppressed(true)
+        setModelDirectory(next)
+        setModelError(null)
+        if (next.current_credential?.configured === false) setCredentialFailureSuppressed(true)
       } catch (nextError) {
         if (!current) return
-        setCredentialStatus(null)
-        setCredentialError(nextError instanceof APIError ? nextError.message : '无法确认 DSH 凭据状态。')
+        setModelDirectory(null)
+        setModelError(nextError instanceof APIError ? nextError.message : '无法读取当前会话的模型状态。')
+      } finally {
+        if (current) setModelLoading(false)
       }
     }
-    void refreshCredential()
-    const changed = () => void refreshCredential()
+    void refreshModels()
+    const changed = () => void refreshModels()
     window.addEventListener('aisummoner:dsh-credential-changed', changed)
+    window.addEventListener('aisummoner:dsh-provider-changed', changed)
     return () => {
       current = false
       window.removeEventListener('aisummoner:dsh-credential-changed', changed)
+      window.removeEventListener('aisummoner:dsh-provider-changed', changed)
     }
   }, [session?.id, session?.provider])
 
@@ -244,7 +264,9 @@ export function AgentPage({
       if (activeSessionID.current === requestSessionID) {
         if (!serverTurnStarted) setPrompt(content)
         if (nextError instanceof APIError && nextError.code === 'PROVIDER_CREDENTIAL_REQUIRED') {
-          setCredentialStatus({ configured: false, writable: true })
+          setModelDirectory((current) => current ? {
+            ...current, current_credential: { configured: false, writable: current.current_credential?.writable ?? true },
+          } : current)
           setCredentialFailureSuppressed(true)
           setSessionError(null)
         } else {
@@ -253,6 +275,28 @@ export function AgentPage({
       }
     } finally {
       if (activeSessionID.current === requestSessionID) setSending(false)
+    }
+  }
+
+  async function selectModel(selection: ModelSelection) {
+    if (!session || session.provider !== 'dsh' || modelChanging || state.turnState === 'running' || state.turnState === 'waiting') return
+    const sessionID = session.id
+    setModelChanging(true)
+    setModelOpen(false)
+    setModelError(null)
+    try {
+      await api.selectAgentSessionModel(sessionID, selection)
+      const refreshed = await api.agentSessionModels(sessionID)
+      if (activeSessionID.current !== sessionID) return
+      setModelDirectory(refreshed)
+      setCredentialFailureSuppressed(refreshed.current_credential?.configured === false)
+      window.dispatchEvent(new Event('aisummoner:dsh-model-changed'))
+    } catch (nextError) {
+      if (activeSessionID.current === sessionID) {
+        setModelError(nextError instanceof APIError ? nextError.message : '无法切换当前会话模型。')
+      }
+    } finally {
+      if (activeSessionID.current === sessionID) setModelChanging(false)
     }
   }
 
@@ -345,16 +389,22 @@ export function AgentPage({
             </div>
           )}
           {!device.online && <div className="notice warning agent-offline" role="alert">设备当前离线。仍可查看历史记录；重新连接后才能开始新一轮对话。</div>}
-          {session.provider === 'dsh' && credentialStatus?.configured === false && (
+          {session.provider === 'dsh' && currentCredential?.configured === false && (
             <div className="notice warning agent-credential-required" role="alert">
-              <div><strong>尚未配置 DeepSeek API 密钥</strong><span>配置后可继续使用当前会话，不需要重新创建。</span></div>
+              <div><strong>{currentProviderGroup?.name ?? modelDirectory?.current.provider ?? '当前供应商'}缺少 API 密钥</strong><span>配置后可继续使用当前会话，不需要重新创建。</span></div>
               <button className="button ghost small" type="button" onClick={onOpenSettings}>打开 Agent 设置</button>
             </div>
           )}
-          {session.provider === 'dsh' && credentialError && (
+          {session.provider === 'dsh' && modelDirectory && !modelDirectory.routable && (
             <div className="notice warning agent-credential-required" role="alert">
-              <span>{credentialError}</span>
-              <button className="button ghost small" type="button" onClick={() => window.dispatchEvent(new Event('aisummoner:dsh-credential-changed'))}>重试</button>
+              <span>当前选择的供应商路由不可用，请重新选择模型或检查供应商配置。</span>
+              <button className="button ghost small" type="button" onClick={() => setModelOpen(true)}>选择模型</button>
+            </div>
+          )}
+          {session.provider === 'dsh' && modelError && (
+            <div className="notice warning agent-credential-required" role="alert">
+              <span>{modelError}</span>
+              <button className="button ghost small" type="button" onClick={() => window.dispatchEvent(new Event('aisummoner:dsh-provider-changed'))}>重试</button>
             </div>
           )}
           <div className="conversation" aria-live="polite" aria-label="Agent 对话">
@@ -379,7 +429,7 @@ export function AgentPage({
               <ReasoningBlock key={item.key} reasoning={item.reasoning} />
             ) : <ToolCallCard key={item.key} tool={item.tool} collapseSignal={collapseSignal} />)}
             {state.failure && !credentialFailureSuppressed &&
-              (session.provider !== 'dsh' || credentialStatus?.configured === true) &&
+              (session.provider !== 'dsh' || currentCredential?.configured !== false) &&
               <div className="notice error" role="alert">{state.failure}</div>}
             {streamState === 'connecting' && <div className="agent-activity" role="status">正在连接 Agent 事件流…</div>}
             {state.turnState === 'running' && <div className="agent-activity" role="status">{provider.workingLabel}</div>}
@@ -400,7 +450,7 @@ export function AgentPage({
                   rows={2}
                   maxLength={16_384}
                   disabled={!device.online || streamState !== 'open' || sending || state.turnState === 'running' || state.turnState === 'waiting' ||
-                    (session.provider === 'dsh' && credentialStatus?.configured !== true)}
+                    modelUnavailable}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault()
@@ -409,9 +459,71 @@ export function AgentPage({
                   }}
                 />
                 <div className="agent-composer-controls">
-                  <button className="composer-runtime" type="button" disabled={!onOpenSettings} onClick={onOpenSettings}>
-                    <ModelIcon /><span>{provider.label}</span>
-                  </button>
+                  <div
+                    className="composer-model-picker"
+                    onBlur={(event) => {
+                      if (!event.currentTarget.contains(event.relatedTarget)) setModelOpen(false)
+                    }}
+                  >
+                    <button
+                      className="composer-runtime"
+                      type="button"
+                      aria-haspopup={session.provider === 'dsh' ? 'menu' : undefined}
+                      aria-expanded={session.provider === 'dsh' ? modelOpen : undefined}
+                      disabled={modelChanging || sending || state.turnState === 'running' || state.turnState === 'waiting'}
+                      onClick={() => session.provider === 'dsh' ? setModelOpen((value) => !value) : onOpenSettings?.()}
+                    >
+                      <ModelIcon />
+                      <span>{modelChanging ? '正在切换…' : modelLoading ? '正在读取模型…' : currentModel?.name ?? modelDirectory?.current.model ?? provider.label}</span>
+                      {session.provider === 'dsh' && <ChevronDownIcon />}
+                    </button>
+                    {session.provider === 'dsh' && modelOpen && (
+                      <div className="model-menu" role="menu" aria-label="当前会话模型">
+                        <header><strong>选择模型</strong><span>下一步开始生效</span></header>
+                        <div className="model-menu-scroll">
+                          {modelDirectory?.groups.map((group) => (
+                            <section className="model-menu-group" key={group.id}>
+                              <h4>{group.name}</h4>
+                              {group.models.map((model) => {
+                                const selected = currentSelection?.provider === group.id && currentSelection.model === model.id
+                                const defaultEffort = selected
+                                  ? currentSelection?.reasoning_effort
+                                  : model.default_reasoning_effort
+                                return (
+                                  <div className="model-menu-entry" data-selected={selected || undefined} key={`${group.id}:${model.id}`}>
+                                    <button
+                                      type="button"
+                                      role="menuitemradio"
+                                      aria-checked={selected}
+                                      onClick={() => void selectModel({
+                                        provider: group.id, model: model.id,
+                                        ...(defaultEffort ? { reasoning_effort: defaultEffort } : {}),
+                                      })}
+                                    ><span><strong>{model.name}</strong><small>{model.id}</small></span><i>{selected ? '✓' : ''}</i></button>
+                                    {selected && model.reasoning_efforts.length > 0 && (
+                                      <div className="model-effort-list" aria-label="推理强度">
+                                        {model.reasoning_efforts.map((effort) => (
+                                          <button
+                                            type="button"
+                                            data-selected={currentSelection?.reasoning_effort === effort.id || undefined}
+                                            key={effort.id}
+                                            onClick={() => void selectModel({ provider: group.id, model: model.id, reasoning_effort: effort.id })}
+                                          >{effort.name}</button>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </section>
+                          ))}
+                          {modelDirectory?.failures.map((failure) => <p className="model-menu-failure" key={failure.id}>{failure.name}：{failure.message}</p>)}
+                          {!modelLoading && (modelDirectory?.groups.length ?? 0) === 0 && <p className="model-menu-empty">没有可选模型，请先配置供应商。</p>}
+                        </div>
+                        <footer><button type="button" onClick={() => { setModelOpen(false); onOpenSettings?.() }}>管理模型供应商</button></footer>
+                      </div>
+                    )}
+                  </div>
                   <div
                     className="composer-permission-picker"
                     onBlur={(event) => {
@@ -453,7 +565,7 @@ export function AgentPage({
                       </div>
                     )}
                   </div>
-                  <button className="composer-send" type="submit" aria-label="发送" disabled={!device.online || streamState !== 'open' || sending || !prompt.trim() || state.turnState === 'running' || state.turnState === 'waiting' || (session.provider === 'dsh' && credentialStatus?.configured !== true)}>
+                  <button className="composer-send" type="submit" aria-label="发送" disabled={!device.online || streamState !== 'open' || sending || !prompt.trim() || state.turnState === 'running' || state.turnState === 'waiting' || modelUnavailable}>
                     {sending ? <span className="composer-spinner" /> : <SendIcon />}
                   </button>
                 </div>

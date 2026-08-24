@@ -174,7 +174,19 @@ describe('Control Workspace', () => {
       if (url === '/api/v1/devices/dev_online') return jsonResponse({ device: onlineDevice })
       if (url.endsWith('/agent-sessions?view=index')) return jsonResponse({ sessions: [current] })
       if (url === '/api/v1/agent-sessions/ags_settings') return jsonResponse(snapshot(current, 'Settings answer'))
-      if (url === '/api/v1/agent-provider/dsh' && init?.method === 'POST') return new Response(null, { status: 204 })
+      if (url === '/api/v1/agent-runtimes/dsh/providers' && (init?.method ?? 'GET') === 'GET') {
+        return jsonResponse({ runtime: {
+          id: 'dsh', display_name: 'DeepSeek Harness', writable: true, custom_provider_revision: 4,
+          protocols: ['openai-completions'], providers: [{
+            id: 'deepseek-official', display_name: 'DeepSeek', family: 'llm-deepseek', active: true,
+            configured: true, custom: false, removable: false, revision: 3, models: [{ id: 'deepseek-chat' }],
+            models_overridden: false, credential: { configured: false, writable: true },
+          }],
+        } })
+      }
+      if (url === '/api/v1/agent-runtimes/dsh/providers/deepseek-official' && init?.method === 'PUT') {
+        return new Response(null, { status: 204 })
+      }
       throw new Error(`unexpected request ${url}`)
     })
     renderWorkspace()
@@ -184,10 +196,11 @@ describe('Control Workspace', () => {
     await user.click(screen.getByRole('button', { name: '设置' }))
     const settings = screen.getByRole('dialog', { name: '设置' })
     await user.click(within(settings).getByRole('button', { name: 'Agent 与模型' }))
-    await user.type(within(settings).getByLabelText('DeepSeek API 密钥'), secret)
-    await user.click(within(settings).getByRole('button', { name: '保存密钥' }))
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/agent-provider/dsh', expect.objectContaining({
-      method: 'POST', body: JSON.stringify({ api_key: secret }),
+    await user.click(await within(settings).findByRole('button', { name: /DeepSeek/ }))
+    await user.type(within(settings).getByLabelText('API 密钥'), secret)
+    await user.click(within(settings).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/agent-runtimes/dsh/providers/deepseek-official', expect.objectContaining({
+      method: 'PUT', body: JSON.stringify({ expected_revision: 3, base_url: '', models_overridden: false, api_key: secret }),
     })))
     expect(document.body).not.toHaveTextContent(secret)
 

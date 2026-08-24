@@ -122,4 +122,12 @@ dist/AISummoner-Remote-0.1.0-x86_64.AppImage --cli refresh-pairing
 6. 测试完成后可在 Remote GUI 暂停连接，或在 Controller 解除绑定。
 
 真实 DSH、OpenCode 或 DeepSeek 需要额外 Runtime/credential 配置，参见
-[部署指南](deployment.md)。
+[部署指南](deployment.md)。DSH 部署完成后，在 Controller 中打开“设置 → Agent 与
+模型”：
+
+1. 在“模型供应商”选择现有 DSH route，写入或替换 API Key；
+2. 也可添加自定义供应商，填写小写 route ID、HTTPS API 地址、协议和至少一个模型；
+3. 回到原 Agent 会话，从输入框左下角选择供应商/模型及可用推理强度；
+4. 缺少 Key 或 route 不可用时先修复设置，再继续原会话，无需新建会话。
+
+密钥框是只写入口：刷新后只显示“已配置/缺少密钥”，不会把原值读回浏览器。

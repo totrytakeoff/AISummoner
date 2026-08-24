@@ -53,6 +53,13 @@ const (
 	MinimumExecTimeout  = time.Second
 	DefaultTurnTimeout  = 5 * time.Minute
 	DefaultApprovalWait = 2 * time.Minute
+	MaxRuntimeIDBytes   = 64
+	MaxProviderIDBytes  = 128
+	MaxModelIDBytes     = 256
+	MaxDisplayNameBytes = 256
+	MaxBaseURLBytes     = 2048
+	MaxReasoningIDBytes = 64
+	MaxProviderModels   = 256
 )
 
 var (
@@ -72,11 +79,30 @@ type Adapter interface {
 	Run(context.Context, RunRequest, EventSink) error
 }
 
-// TurnPreflighter is an optional value-free readiness check performed before a
-// user message is persisted. Provider adapters use it only for actionable
-// configuration state; the provider remains responsible for the real Turn.
+// TurnPreflighter is an optional value-free readiness check performed after
+// the Runtime Session is prepared and before a user message is persisted.
+// Provider adapters use it only for actionable configuration state; the
+// provider remains responsible for the real Turn.
 type TurnPreflighter interface {
-	PreflightTurn(context.Context) error
+	PreflightTurn(context.Context, RunRequest) error
+}
+
+// RuntimeSessionAdapter is the optional rich Session configuration capability
+// implemented by Runtimes with a native provider/model directory. The opaque
+// external Session ID is minted and interpreted only by that Runtime.
+type RuntimeSessionAdapter interface {
+	PrepareSession(context.Context, string) (string, error)
+	Models(context.Context, string) (ModelDirectory, error)
+	SelectModel(context.Context, string, ModelSelection) (ModelSelection, error)
+}
+
+// RuntimeConfigurationAdapter is the optional Host-level provider
+// configuration capability. All returned credential data is structurally
+// value-free; mutations carry a secret only in the write direction.
+type RuntimeConfigurationAdapter interface {
+	ProviderDirectory(context.Context) (RuntimeProviderDirectory, error)
+	ConfigureProvider(context.Context, RuntimeProviderMutation) error
+	RemoveProvider(context.Context, string, int64) error
 }
 
 type RunRequest struct {
@@ -85,6 +111,117 @@ type RunRequest struct {
 	UserText          string
 	History           []ConversationMessage
 	RemoteExec        RemoteExecInvoker
+}
+
+// CredentialStatus is the value-free provider credential projection shared by
+// Runtime configuration and current-Session readiness surfaces.
+type CredentialStatus struct {
+	Configured bool
+	Writable   bool
+}
+
+// ModelSelection is the complete model route applied to the next Runtime
+// request assembled for a Session.
+type ModelSelection struct {
+	Provider        string
+	Model           string
+	ReasoningEffort string
+}
+
+// ModelReasoningEffort is one adapter-owned effort accepted by an exact model.
+type ModelReasoningEffort struct {
+	ID          string
+	Name        string
+	Description string
+}
+
+// RuntimeModel describes one selectable model without provider secrets or
+// provider-specific request configuration.
+type RuntimeModel struct {
+	ID                     string
+	Name                   string
+	Description            string
+	ContextWindow          int64
+	MaxTokens              int64
+	ReasoningEfforts       []ModelReasoningEffort
+	DefaultReasoningEffort string
+}
+
+// ModelProviderGroup is one provider and its bounded selectable model catalog.
+type ModelProviderGroup struct {
+	ID     string
+	Name   string
+	Models []RuntimeModel
+}
+
+// ModelCatalogFailure keeps one provider-local catalog failure from hiding
+// otherwise usable provider groups.
+type ModelCatalogFailure struct {
+	ID      string
+	Name    string
+	Message string
+}
+
+// ModelDirectory is the Runtime-owned selection and catalog for one product
+// Session. CurrentCredential is nil when the route names no managed reference.
+type ModelDirectory struct {
+	Current           ModelSelection
+	Routable          bool
+	Groups            []ModelProviderGroup
+	Failures          []ModelCatalogFailure
+	CurrentCredential *CredentialStatus
+}
+
+// RuntimeProviderModel is the curated model metadata exposed in provider
+// settings. Zero capacities mean the Runtime owns the default.
+type RuntimeProviderModel struct {
+	ID            string
+	Name          string
+	ContextWindow int64
+	MaxTokens     int64
+}
+
+// RuntimeProviderProfile is one redacted configurable provider route. Family
+// identifies the owning adapter schema, not a wire protocol.
+type RuntimeProviderProfile struct {
+	ID               string
+	DisplayName      string
+	Family           string
+	Active           bool
+	Configured       bool
+	Custom           bool
+	Removable        bool
+	Revision         int64
+	BaseURL          string
+	API              string
+	Models           []RuntimeProviderModel
+	ModelsOverridden bool
+	Credential       *CredentialStatus
+}
+
+// RuntimeProviderDirectory is the redacted Host-level provider configuration
+// view. CustomProviderRevision belongs to the namespace used for a new route.
+type RuntimeProviderDirectory struct {
+	Runtime                string
+	DisplayName            string
+	Writable               bool
+	CustomProviderRevision int64
+	Protocols              []string
+	Providers              []RuntimeProviderProfile
+}
+
+// RuntimeProviderMutation is the curated desired profile. Empty optional
+// strings remove the corresponding user override; a nil Models slice restores
+// the Runtime catalog, while a non-nil slice is an explicit catalog.
+type RuntimeProviderMutation struct {
+	Provider         string
+	ExpectedRevision int64
+	DisplayName      string
+	BaseURL          string
+	API              string
+	Models           []RuntimeProviderModel
+	ModelsOverridden bool
+	APIKey           string
 }
 
 // ConversationMessage is the provider-neutral, bounded model history derived

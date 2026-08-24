@@ -67,7 +67,6 @@ function WorkspaceSettings({
       runtimeLabel={runtimeLabel}
       username={user?.username || '账户'}
       onClose={onClose}
-      onConfigureDSH={(apiKey) => api.configureDSH(apiKey)}
       onUnpair={onUnpair}
       onSignOut={logout}
       onArchivedSessionsChanged={onArchivedSessionsChanged}

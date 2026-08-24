@@ -8,6 +8,10 @@ import type {
   DSHCredentialStatus,
   ErrorDetail,
   ErrorEnvelope,
+  ModelDirectory,
+  ModelSelection,
+  RuntimeProviderDirectory,
+  RuntimeProviderMutation,
   ToolDecision,
   User,
 } from './types'
@@ -37,7 +41,9 @@ const localizedErrors: Record<string, string> = {
   REMOTE_EXEC_CANCELED: '远程命令已取消。',
   REMOTE_EXEC_TIMEOUT: '远程命令执行超时。',
   REMOTE_EXEC_TRANSPORT: '远程命令通道异常。',
-  PROVIDER_CREDENTIAL_REQUIRED: '尚未配置 DeepSeek API 密钥，请先在设置中完成配置。',
+  PROVIDER_CREDENTIAL_REQUIRED: '当前模型供应商尚未配置所需的 API 密钥，请先在设置中完成配置。',
+  CONFIGURATION_CONFLICT: '供应商配置已被其他操作更新，请刷新后重试。',
+  MODEL_UNAVAILABLE: '所选模型当前不可用，请重新选择。',
   TERMINAL_LIMIT: '该设备的终端连接数已达上限。',
   WEBSOCKET_UNAVAILABLE: '实时连接暂时不可用。',
   OPERATION_FAILED: '操作未能完成，请重试。',
@@ -190,6 +196,27 @@ export const api = {
     return response.credential
   },
 
+  async runtimeProviders(runtime = 'dsh'): Promise<RuntimeProviderDirectory> {
+    const response = await request<{ runtime: RuntimeProviderDirectory }>(
+      `/api/v1/agent-runtimes/${resourceID(runtime)}/providers`,
+    )
+    return response.runtime
+  },
+
+  configureRuntimeProvider(runtime: string, provider: string, mutation: RuntimeProviderMutation): Promise<void> {
+    return request<void>(
+      `/api/v1/agent-runtimes/${resourceID(runtime)}/providers/${resourceID(provider)}`,
+      { method: 'PUT', body: jsonBody(mutation) },
+    )
+  },
+
+  removeRuntimeProvider(runtime: string, provider: string, expectedRevision: number): Promise<void> {
+    return request<void>(
+      `/api/v1/agent-runtimes/${resourceID(runtime)}/providers/${resourceID(provider)}`,
+      { method: 'DELETE', body: jsonBody({ expected_revision: expectedRevision }) },
+    )
+  },
+
   async agentSettings(): Promise<AgentSettings> {
     const response = await request<{ settings: AgentSettings }>('/api/v1/agent-settings')
     return response.settings
@@ -229,6 +256,18 @@ export const api = {
 
   agentSession(sessionID: string): Promise<AgentSnapshot> {
     return request<AgentSnapshot>(`/api/v1/agent-sessions/${resourceID(sessionID)}`)
+  },
+
+  agentSessionModels(sessionID: string): Promise<ModelDirectory> {
+    return request<ModelDirectory>(`/api/v1/agent-sessions/${resourceID(sessionID)}/models`)
+  },
+
+  async selectAgentSessionModel(sessionID: string, selection: ModelSelection): Promise<ModelSelection> {
+    const response = await request<{ selected: ModelSelection }>(
+      `/api/v1/agent-sessions/${resourceID(sessionID)}/models`,
+      { method: 'PATCH', body: jsonBody(selection) },
+    )
+    return response.selected
   },
 
   async updateAgentSessionApproval(sessionID: string, approvalMode: ApprovalMode): Promise<AgentSession> {

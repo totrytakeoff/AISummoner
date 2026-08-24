@@ -53,6 +53,8 @@ AISummoner is a browser-controlled, server-side Agent and SSH remote execution p
   the Remote daemon/private IPC and Qt AppImage. Tasks017-021 produced the
   DSH-first Controller workspace, real DSH Runtime chain, Session permission/
   recovery/lifecycle behavior and the first human-accepted Controller milestone.
+  Task022 adds DSH-native redacted Provider management plus current-Session
+  provider/model/reasoning selection behind optional common Adapter capabilities.
 - ADR-0001 fixes Go/React/WSS/yamux/Embedded SSHD/SQLite.
 - ADR-0002 replaced the original OpenAI Agent Loop with an OpenCode loopback sidecar plus a Fake Adapter for MVP-0.
 - ADR-0003 defines the provider-neutral Agent/Web seams and permits direct adapters such as DeepSeek without adding a second execution or session authority.
@@ -63,6 +65,9 @@ AISummoner is a browser-controlled, server-side Agent and SSH remote execution p
   Task018 replace its provisional presentation with the pinned DSH-first light
   shell, retire Device Manage, and put Agent/Device configuration in Workspace
   Settings while keeping Experience and Runtime adapters separate.
+- ADR-0006 separates Runtime identity, Host-level Provider configuration and
+  current-Session model selection. DSH remains the fact source; future
+  file-backed adapters must use managed-document atomic/rollback semantics.
 - Server is single-node and authoritative for user/device/session ownership.
 - Online Tunnel connections live only in memory.
 - DSH and OpenCode call a Go loopback Capability Bridge; direct DeepSeek uses

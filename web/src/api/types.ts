@@ -62,6 +62,84 @@ export interface DSHCredentialStatus {
   writable: boolean
 }
 
+export interface RuntimeProviderModel {
+  id: string
+  name?: string
+  context_window?: number
+  max_tokens?: number
+}
+
+export interface RuntimeProviderProfile {
+  id: string
+  display_name: string
+  family: string
+  active: boolean
+  configured: boolean
+  custom: boolean
+  removable: boolean
+  revision: number
+  base_url?: string
+  api?: string
+  models: RuntimeProviderModel[]
+  models_overridden: boolean
+  credential?: DSHCredentialStatus
+}
+
+export interface RuntimeProviderDirectory {
+  id: string
+  display_name: string
+  writable: boolean
+  custom_provider_revision: number
+  protocols: string[]
+  providers: RuntimeProviderProfile[]
+}
+
+export interface RuntimeProviderMutation {
+  expected_revision: number
+  display_name?: string
+  base_url?: string
+  api?: string
+  models?: RuntimeProviderModel[]
+  models_overridden: boolean
+  api_key?: string
+}
+
+export interface ModelReasoningEffort {
+  id: string
+  name: string
+  description?: string
+}
+
+export interface RuntimeModel {
+  id: string
+  name: string
+  description?: string
+  context_window?: number
+  max_tokens?: number
+  reasoning_efforts: ModelReasoningEffort[]
+  default_reasoning_effort?: string
+}
+
+export interface ModelProviderGroup {
+  id: string
+  name: string
+  models: RuntimeModel[]
+}
+
+export interface ModelSelection {
+  provider: string
+  model: string
+  reasoning_effort?: string
+}
+
+export interface ModelDirectory {
+  current: ModelSelection
+  routable: boolean
+  groups: ModelProviderGroup[]
+  failures: Array<{ id: string; name: string; message: string }>
+  current_credential?: DSHCredentialStatus
+}
+
 export interface AgentMessage {
   id: string
   role: 'user' | 'assistant' | 'reasoning'

@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ControllerSettingsDialog } from './ControllerSettingsDialog'
-import { APIError } from '../api/client'
 import { jsonResponse, onlineDevice } from '../test/helpers'
 import type { AgentSessionSummary } from '../api/types'
 
@@ -11,17 +10,37 @@ const defaults = {
   runtimeLabel: 'OpenCode',
   username: 'admin',
   onClose: vi.fn(),
-  onConfigureDSH: vi.fn(async () => {}),
   onUnpair: vi.fn(async () => {}),
   onSignOut: vi.fn(async () => {}),
 }
 
-function installSettingsFetch(configured: () => boolean = () => false, archived: AgentSessionSummary[] = []) {
+function runtimeDirectory(configured: boolean) {
+  return {
+    runtime: {
+      id: 'dsh', display_name: 'DeepSeek Harness', writable: true, custom_provider_revision: 4,
+      protocols: ['openai-completions', 'openai-responses', 'anthropic-messages'],
+      providers: [{
+        id: 'deepseek-official', display_name: 'DeepSeek', family: 'llm-deepseek', active: true,
+        configured: true, custom: false, removable: false, revision: 3, models: [{ id: 'deepseek-chat' }],
+        models_overridden: false, credential: { configured, writable: true },
+      }],
+    },
+  }
+}
+
+function installSettingsFetch(
+  configured: () => boolean = () => false,
+  archived: AgentSessionSummary[] = [],
+  mutateProvider: (body: string | undefined) => Promise<Response> = async () => new Response(null, { status: 204 }),
+) {
   return vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
     const url = String(input)
     const method = init?.method ?? 'GET'
-    if (url === '/api/v1/agent-provider/dsh' && method === 'GET') {
-      return Promise.resolve(jsonResponse({ credential: { configured: configured(), writable: true } }))
+    if (url === '/api/v1/agent-runtimes/dsh/providers' && method === 'GET') {
+      return Promise.resolve(jsonResponse(runtimeDirectory(configured())))
+    }
+    if (url.startsWith('/api/v1/agent-runtimes/dsh/providers/') && method === 'PUT') {
+      return mutateProvider(init?.body?.toString())
     }
     if (url === '/api/v1/agent-settings' && method === 'GET') {
       return Promise.resolve(jsonResponse({ settings: { default_approval_mode: 'per_command', updated_at: null } }))
@@ -45,24 +64,31 @@ function installSettingsFetch(configured: () => boolean = () => false, archived:
 describe('DSH-first Controller settings', () => {
   it('separates the DSH experience from the actual runtime and keeps provider secrets transient', async () => {
     const user = userEvent.setup()
-    let configured = false
-    const configure = vi.fn(async () => { configured = true })
-    installSettingsFetch(() => configured)
+    const fetchMock = installSettingsFetch()
     const storageWrite = vi.spyOn(Storage.prototype, 'setItem')
     const secret = 'sk-controller-settings-secret'
-    render(<ControllerSettingsDialog {...defaults} initialSection="agent" onConfigureDSH={configure} />)
+    render(<ControllerSettingsDialog {...defaults} initialSection="agent" />)
 
     expect(document.querySelector('.settings-hero-card p')).toHaveTextContent('DSH 体验层 · OpenCode 运行时')
     expect(screen.getByText('一等运行时 · 已接入')).toBeInTheDocument()
-    const key = screen.getByLabelText('DeepSeek API 密钥')
+    await user.click(await screen.findByRole('button', { name: /DeepSeek/ }))
+    const key = screen.getByLabelText('API 密钥')
     expect(key).toHaveAttribute('type', 'password')
     expect(key).toHaveAttribute('autocomplete', 'off')
     await user.type(key, secret)
-    await user.click(screen.getByRole('button', { name: '保存密钥' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
 
-    await waitFor(() => expect(configure).toHaveBeenCalledWith(secret))
-    expect(key).toHaveValue('')
-    expect(screen.getByText(/当前会话和旧会话都可以立即继续使用/)).toBeInTheDocument()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/agent-runtimes/dsh/providers/deepseek-official',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({
+          expected_revision: 3, base_url: '', models_overridden: false, api_key: secret,
+        }),
+      }),
+    ))
+    expect(screen.queryByLabelText('API 密钥')).not.toBeInTheDocument()
+    expect(screen.getByText(/当前会话无需重建/)).toBeInTheDocument()
     expect(document.body).not.toHaveTextContent(secret)
     expect(storageWrite).not.toHaveBeenCalled()
   })
@@ -70,7 +96,9 @@ describe('DSH-first Controller settings', () => {
   it('retains a rejected key only while the modal is open and clears it after close', async () => {
     const user = userEvent.setup()
     const secret = 'sk-retry-only-in-memory'
-    installSettingsFetch()
+    installSettingsFetch(() => false, [], async () => jsonResponse({
+      error: { code: 'INVALID_REQUEST', message: 'invalid request', request_id: 'req_provider' },
+    }, 400))
 
     function Harness() {
       const [open, setOpen] = useState(true)
@@ -79,21 +107,51 @@ describe('DSH-first Controller settings', () => {
           {...defaults}
           initialSection="agent"
           onClose={() => setOpen(false)}
-          onConfigureDSH={async () => { throw new APIError(400, { code: 'INVALID_REQUEST', message: 'invalid request' }) }}
         />
       ) : <button type="button" onClick={() => setOpen(true)}>重新打开设置</button>
     }
 
     render(<Harness />)
-    const key = screen.getByLabelText('DeepSeek API 密钥')
+    await user.click(await screen.findByRole('button', { name: /DeepSeek/ }))
+    const key = screen.getByLabelText('API 密钥')
     await user.type(key, secret)
-    await user.click(screen.getByRole('button', { name: '保存密钥' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
     expect(await screen.findByText('请求内容无效，请检查后重试。')).toBeInTheDocument()
     expect(key).toHaveValue(secret)
 
     await user.click(screen.getAllByRole('button', { name: '关闭设置' }).at(-1)!)
     await user.click(screen.getByRole('button', { name: '重新打开设置' }))
-    expect(screen.getByLabelText('DeepSeek API 密钥')).toHaveValue('')
+    await user.click(await screen.findByRole('button', { name: /DeepSeek/ }))
+    expect(screen.getByLabelText('API 密钥')).toHaveValue('')
+  })
+
+  it('creates a custom DSH provider with its protocol and bounded model metadata', async () => {
+    const user = userEvent.setup()
+    const fetchMock = installSettingsFetch()
+    render(<ControllerSettingsDialog {...defaults} initialSection="agent" />)
+
+    await user.click(await screen.findByRole('button', { name: '添加自定义供应商' }))
+    await user.type(screen.getByLabelText('供应商 ID'), 'my-gateway')
+    await user.type(screen.getByLabelText('显示名称'), '我的网关')
+    await user.type(screen.getByLabelText('API 地址'), 'https://gateway.example/v1')
+    await user.selectOptions(screen.getByLabelText('接口协议'), 'openai-responses')
+    await user.type(screen.getByLabelText('模型 1 ID'), 'qwen-coder')
+    await user.type(screen.getByLabelText('模型 1 名称'), 'Qwen Coder')
+    await user.type(screen.getByLabelText('模型 1 上下文'), '65536')
+    await user.type(screen.getByLabelText('模型 1 最大输出'), '8192')
+    await user.click(screen.getByRole('button', { name: '创建供应商' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/agent-runtimes/dsh/providers/my-gateway',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({
+          expected_revision: 4, display_name: '我的网关', base_url: 'https://gateway.example/v1',
+          api: 'openai-responses', models_overridden: true,
+          models: [{ id: 'qwen-coder', name: 'Qwen Coder', context_window: 65536, max_tokens: 8192 }],
+        }),
+      }),
+    ))
   })
 
   it('keeps device management inside Settings and requires confirmation before unpair', async () => {

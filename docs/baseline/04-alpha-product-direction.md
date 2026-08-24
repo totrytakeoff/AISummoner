@@ -13,9 +13,11 @@
 - Device Hub → 三栏 Control Workspace 和 DSH-first Controller 基线；
 - 真实 DSH Host/Adapter/Capability Bridge → Remote SSH 链路；
 - Session 权限、缺失凭据恢复、有序 replay、命令折叠与归档/删除。
+- DSH 原生多供应商配置，以及当前 Session 的供应商/模型/推理强度切换。
 
-用户已接受“控制端初具雏形”的阶段性成果。仍未完成的是标准事件 v2、完整 DSH
-原生交互、OpenCode/Codex/Claude Code 丰富适配，以及 Windows Remote Client。
+用户已接受“控制端初具雏形”的阶段性成果。仍未完成的是标准事件 v2、DSH 的
+cancel/steer/queue 等完整原生交互、OpenCode/Codex/Claude Code 丰富适配，以及
+Windows Remote Client。
 实时进度以 [公开 Roadmap](../roadmap.md) 和
 [`agent_context/roadmap.md`](../agent_context/roadmap.md) 为准。
 
@@ -230,6 +232,11 @@ Controller Settings 提供 Provider Profile：
 - 默认 Provider 作用于新 Session，现有 Session 和 in-flight Turn 不被暗中切换；
 - 可在新 Session 时覆盖 Provider/Model，Session 头部始终显示实际绑定；
 - credential 最终应由 Server 侧加密存储或外部 secret reference 管理。当前 DeepSeek 进程内存输入保留为过渡方案，不能扩展成 Browser localStorage。
+
+DSH 首个实现进一步区分 Host 级 Provider Settings 与当前 Runtime Session 的模型选择。
+DSH 原生 settings/credential/session RPC 是事实来源；AISummoner 只投影脱敏字段并
+持久化不透明 Session ID。后续文件型 Runtime 必须遵守 ADR-0006 的 managed-document
+事务，不能让 Web UI 直接编辑路径或覆盖未知配置。
 
 ### 6.4 Remote Capability Plane
 

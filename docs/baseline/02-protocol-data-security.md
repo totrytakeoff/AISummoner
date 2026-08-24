@@ -247,6 +247,11 @@ POST /api/v1/agent-sessions/{session_id}/messages
 GET  /api/v1/agent-sessions/{session_id}/events
 POST /api/v1/tool-calls/{tool_call_id}/decision
 POST /api/v1/agent-provider/deepseek
+GET  /api/v1/agent-runtimes/{runtime}/providers
+PUT  /api/v1/agent-runtimes/{runtime}/providers/{provider}
+DELETE /api/v1/agent-runtimes/{runtime}/providers/{provider}
+GET  /api/v1/agent-sessions/{session_id}/models
+PATCH /api/v1/agent-sessions/{session_id}/models
 ```
 
 创建 Session：
@@ -311,6 +316,21 @@ HTTPS origin 且禁止 redirect。成功返回空的 `204`，不回显 Key/model
 新 Adapter 只保留在进程内存。后续新 Session 记录 `provider=deepseek`；旧
 Session 保留原 Provider，运行中的 Turn 不被切换。Key 不写 SQLite、日志、
 审计、环境文件、URL、Browser storage 或错误响应，Server 重启后失效。
+
+Alpha 的 DSH Runtime 配置使用独立的通用投影。`agent_sessions.provider=dsh`
+仍表示 Runtime；DSH 内部的供应商、模型和推理强度不写进该字段。Provider 目录只
+返回受控字段和 `configured/writable`，不返回 credential ref/source/value、raw
+settings/schema 或 Provider 原始诊断。API Key 只允许写入 DSH 私有凭据库。
+
+供应商配置使用 DSH namespace `expected_revision` 和最小 path operation，保留未暴露
+字段；自定义 route 仅在 DSH 声明为用户拥有且可删除时删除。模型读取/选择使用
+不透明 DSH Session ID，并与同一产品 Session 的 Turn 准入互斥。缺少当前 route 的
+托管凭据或 route 不可用时，preflight 在用户消息落库前失败；修复配置或改选模型后
+继续原 Session。
+
+上述所有写请求（包括 `PUT`）都必须先通过管理员 Session 和精确 `Origin` 校验。
+请求/回复、ID、字符串和模型数有界；配置响应不得回显 API Key。完整决策见
+[ADR-0006](../decisions/ADR-0006-runtime-provider-model-configuration.md)。
 
 ## 6. HTTP 错误格式
 
@@ -459,7 +479,8 @@ authenticated_user.id == devices.owner_user_id
 - Tool Call 超时后关闭 SSH stream；
 - 合并输出超过 256 KiB 时截断并明确告知模型；
 - 每个 Turn 最长 5 分钟；
-- 每个 Turn 最多 12 次 Tool Call；
+- Tool Call 不设跨 Turn 累计次数墙；每次执行仍受 Turn deadline、审批、命令/输出
+  字节上限和 Runtime 自身的上下文、资源与取消语义约束；
 - OpenCode sidecar 只监听 loopback，使用 Basic Auth，内置本地工具全部禁用；
 - DeepSeek Adapter 只通过校验后的 HTTPS origin 出站，禁止 redirect，不记录
   API Key、Provider 原始请求/响应或 reasoning，且只向模型公布
@@ -469,6 +490,8 @@ authenticated_user.id == devices.owner_user_id
 - Web 配置 DeepSeek 时，必须先完成同源 Origin 与管理员 Session 校验，再读取
   有界 JSON；配置成功只更新内存 Adapter registry，不持久化凭据。浏览器表单
   不使用 localStorage/sessionStorage，取消或成功后清除输入；
+- DSH 多供应商配置的凭据值只写不读；Browser 不接触 DSH loopback Host。Base URL
+  只接受 HTTPS 或显式数值 loopback HTTP，AISummoner 的 DSH transport 禁止 redirect；
 - `remote_exec` bridge 不接受 host/device 参数，目标由 external session 映射确定；
 - Remote `exec` 使用 `$SHELL -lc <command>`，权限等于 Remote Client 用户；
 - cwd 使用 SSH env request 设置 `exec.Cmd.Dir`，必须存在且为目录；

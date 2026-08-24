@@ -22,7 +22,7 @@ OpenCode/Codex/Claude Code，以及扩展 Windows Remote Client。
 | Browser Controller | DSH-first 三栏工作区；Device、Session、Agent、Terminal 与设置已打通 |
 | Remote Client | Linux x86_64：Go daemon + 私有 IPC + Qt 6 Widgets GUI + AppImage |
 | Terminal | 真实 SSH PTY、交互输入、resize、关闭与断线回收 |
-| Agent | Fake、DSH、直接 DeepSeek 与 MVP OpenCode 适配；统一 Remote 执行边界 |
+| Agent | DSH 多供应商/模型切换；Fake、直接 DeepSeek 与 MVP OpenCode；统一 Remote 执行边界 |
 | Session | 恢复、权限模式、归档、恢复、删除与有序事件重放 |
 | 部署 | 单节点、单管理员、自托管；Docker/Caddy 示例与直接二进制部署 |
 | 平台 | Linux 已验证；Windows 计划中；macOS 尚未承诺 |
@@ -119,10 +119,19 @@ APPIMAGE_EXTRACT_AND_RUN=1 ./AISummoner-Remote-0.1.0-x86_64.AppImage
 [部署指南](docs/deployment.md)，特别是 TLS、精确 trusted proxy、私有数据目录、
 Provider secret 与公开端口约束。
 
+```bash
+install -m 600 .env.example .env
+# 编辑 .env 后先确认权限，再运行 Compose 的 secret-safe 校验。
+test "$(stat -c '%a' .env)" = 600
+sh deploy/validate-compose.sh
+docker compose --env-file .env -f deploy/compose.yaml up -d --build
+```
+
 ## Agent Runtime 路线
 
 - **[DSH（DeepSeek Harness）](https://github.com/deepseek-ai/deepseek-harness)**：
-  当前一等 Runtime/UX 基线，真实 Remote 工具链已跑通。
+  当前一等 Runtime/UX 基线，真实 Remote 工具链已跑通；支持 DSH 原生供应商配置、
+  自定义兼容网关，以及当前会话的模型/推理强度切换。
 - **OpenCode**：已有 MVP 适配，下一阶段补齐原生 Session/Turn/cancel/usage 映射。
 - **Codex**：计划通过官方 App Server 机器接口接入。
 - **Claude Code**：计划通过官方 Agent SDK/流式接口接入。

@@ -20,6 +20,7 @@
 - DSH-first Controller 视觉与交互基线；
 - 真实 DSH Runtime → Capability Bridge → Remote SSH 链路；
 - Session 权限、凭据恢复、有序 replay、折叠、归档和删除。
+- DSH 原生多供应商配置与当前 Session 的模型/推理强度切换。
 
 这构成当前“控制端初具雏形”的阶段性成果，但仍需要持续体验打磨和发布工程。
 

@@ -97,7 +97,7 @@ func classifyPath(value string) routeKind {
 	case value == "/api/v1/agent-provider/deepseek" || value == "/api/v1/agent-provider/dsh" ||
 		value == "/api/v1/agent-settings" || value == "/api/v1/agent-sessions":
 		return routeAgent
-	case agentSessionPath(value), oneSegmentBetween(value, "/api/v1/tool-calls/", "/decision"):
+	case agentRuntimeProviderPath(value), agentSessionPath(value), oneSegmentBetween(value, "/api/v1/tool-calls/", "/decision"):
 		return routeAgent
 	case value == "/healthz":
 		return routeHealth
@@ -125,7 +125,23 @@ func agentSessionPath(value string) bool {
 	if len(segments) == 1 {
 		return segments[0] != ""
 	}
-	return len(segments) == 2 && segments[0] != "" && (segments[1] == "messages" || segments[1] == "events")
+	return len(segments) == 2 && segments[0] != "" &&
+		(segments[1] == "messages" || segments[1] == "events" || segments[1] == "models")
+}
+
+func agentRuntimeProviderPath(value string) bool {
+	const prefix = "/api/v1/agent-runtimes/"
+	if !strings.HasPrefix(value, prefix) {
+		return false
+	}
+	segments := strings.Split(strings.TrimPrefix(value, prefix), "/")
+	if len(segments) != 2 && len(segments) != 3 {
+		return false
+	}
+	if segments[0] == "" || segments[1] != "providers" {
+		return false
+	}
+	return len(segments) == 2 || segments[2] != ""
 }
 
 func oneSegmentBetween(value, prefix, suffix string) bool {

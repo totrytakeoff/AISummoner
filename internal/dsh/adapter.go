@@ -35,13 +35,15 @@ const (
 )
 
 const (
-	maximumRPCResponseBytes = 128 * 1024
-	maximumEventFrameBytes  = 512 * 1024
-	maximumExternalIDBytes  = 512
-	maximumCredentialBytes  = 4096
-	requestTimeout          = 15 * time.Second
-	cancelTimeout           = 3 * time.Second
-	subscribeTimeout        = 10 * time.Second
+	maximumRPCResponseBytes              = 128 * 1024
+	maximumCatalogRPCResponseBytes       = 512 * 1024
+	maximumConfigurationRPCResponseBytes = 2 * 1024 * 1024
+	maximumEventFrameBytes               = 512 * 1024
+	maximumExternalIDBytes               = 512
+	maximumCredentialBytes               = 4096
+	requestTimeout                       = 15 * time.Second
+	cancelTimeout                        = 3 * time.Second
+	subscribeTimeout                     = 10 * time.Second
 )
 
 type HealthStatus string
@@ -56,13 +58,8 @@ type HealthResult struct {
 	Version string
 }
 
-// CredentialStatus is the value-free readiness projection exposed to the
-// authenticated Controller. It intentionally omits the provider's source and
-// can never contain the credential value.
-type CredentialStatus struct {
-	Configured bool
-	Writable   bool
-}
+// CredentialStatus is retained as the DSH package's value-free public alias.
+type CredentialStatus = agent.CredentialStatus
 
 // Options contains only the private Host transport and the already reviewed
 // AISummoner capability activator.
@@ -231,37 +228,53 @@ func (adapter *Adapter) DescribeCredential(ctx context.Context) (CredentialStatu
 	return CredentialStatus{Configured: view.Configured, Writable: view.Writable}, nil
 }
 
-// PreflightTurn prevents a missing credential from creating a failed product
-// Turn. The old Session remains idle/failed and is immediately reusable after
-// ConfigureCredential succeeds.
-func (adapter *Adapter) PreflightTurn(ctx context.Context) error {
-	status, err := adapter.DescribeCredential(ctx)
+// PreflightTurn evaluates the selected DSH provider instead of assuming the
+// official DeepSeek route. It prevents a named missing credential or removed
+// route from creating a failed product Turn.
+func (adapter *Adapter) PreflightTurn(ctx context.Context, request agent.RunRequest) error {
+	if request.ExternalSessionID == "" {
+		return protocolError("DSH Session was not prepared before preflight")
+	}
+	directory, err := adapter.Models(ctx, request.ExternalSessionID)
 	if err != nil {
 		return err
 	}
-	if !status.Configured {
-		return &agent.AdapterError{Code: "credential_required", Err: errors.New("DSH credential is not configured")}
+	if !directory.Routable {
+		return &agent.AdapterError{Code: "provider_unavailable", Err: errors.New("selected DSH provider route is unavailable")}
+	}
+	if directory.CurrentCredential != nil && !directory.CurrentCredential.Configured {
+		return &agent.AdapterError{Code: "credential_required", Err: errors.New("selected DSH provider credential is not configured")}
 	}
 	return nil
+}
+
+// PrepareSession creates or resumes the private DSH Session identified by an
+// opaque ID. A new ID is returned to the product Service for owner-scoped
+// persistence before a Turn or model mutation proceeds.
+func (adapter *Adapter) PrepareSession(ctx context.Context, externalID string) (string, error) {
+	if externalID == "" {
+		var err error
+		externalID, err = adapter.newID("ses")
+		if err != nil {
+			return "", protocolError("create DSH session id")
+		}
+	}
+	if !validExternalSessionID(externalID) {
+		return "", protocolError("invalid persisted DSH session id")
+	}
+	if err := adapter.createOrResume(ctx, externalID); err != nil {
+		return "", err
+	}
+	return externalID, nil
 }
 
 func (adapter *Adapter) Run(ctx context.Context, request agent.RunRequest, sink agent.EventSink) error {
 	if ctx == nil || request.SessionID == "" || request.RemoteExec == nil || sink == nil || request.UserText == "" {
 		return protocolError("invalid DSH run request")
 	}
-	externalID := request.ExternalSessionID
-	newExternalID := externalID == ""
-	if newExternalID {
-		var err error
-		externalID, err = adapter.newID("ses")
-		if err != nil {
-			return protocolError("create DSH session id")
-		}
-	}
-	if !validExternalSessionID(externalID) {
-		return protocolError("invalid persisted DSH session id")
-	}
-	if err := adapter.createOrResume(ctx, externalID); err != nil {
+	newExternalID := request.ExternalSessionID == ""
+	externalID, err := adapter.PrepareSession(ctx, request.ExternalSessionID)
+	if err != nil {
 		return err
 	}
 	if newExternalID {
@@ -558,8 +571,15 @@ func classifyTurnEnd(reason turnEndReason) error {
 }
 
 func (adapter *Adapter) call(ctx context.Context, method string, payload, destination any) error {
+	return adapter.callBounded(ctx, method, payload, destination, maximumRPCResponseBytes)
+}
+
+func (adapter *Adapter) callBounded(ctx context.Context, method string, payload, destination any, maximumBytes int64) error {
 	if ctx == nil {
 		return errors.New("DSH request context is required")
+	}
+	if maximumBytes <= 0 {
+		return protocolError("invalid DSH response limit")
 	}
 	rpcID, err := adapter.newID("req")
 	if err != nil {
@@ -595,8 +615,8 @@ func (adapter *Adapter) call(ctx context.Context, method string, payload, destin
 	if err != nil || mediaType != "application/json" {
 		return protocolError("DSH response content type is invalid")
 	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, maximumRPCResponseBytes+1))
-	if err != nil || len(body) == 0 || len(body) > maximumRPCResponseBytes {
+	body, err := io.ReadAll(io.LimitReader(response.Body, maximumBytes+1))
+	if err != nil || len(body) == 0 || int64(len(body)) > maximumBytes {
 		return protocolError("DSH response exceeds the safe limit")
 	}
 	var envelope rpcResponse
@@ -628,9 +648,13 @@ func classifyRPCError(code string) error {
 	switch code {
 	case "cancelled":
 		return context.Canceled
-	case "agent-busy", "model-unavailable", "session-conflict", "agent-preset-conflict", "credential-rejected":
+	case "settings-conflict":
+		return &agent.AdapterError{Code: "configuration_conflict", Err: errors.New("DSH settings changed concurrently")}
+	case "model-unavailable":
+		return &agent.AdapterError{Code: "model_unavailable", Err: errors.New("DSH model is unavailable")}
+	case "agent-busy", "session-conflict", "agent-preset-conflict", "credential-rejected", "settings-rejected", "bad-request":
 		return &agent.AdapterError{Code: "provider_rejected", Err: errors.New("DSH request was rejected")}
-	case "internal":
+	case "internal", "settings-not-exposed":
 		return providerUnavailable()
 	case "session-not-found":
 		return &agent.AdapterError{Code: "provider_unavailable", Err: errors.New("DSH session is unavailable")}

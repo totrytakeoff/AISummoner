@@ -8,6 +8,15 @@ updated_by: planner
 
 ## Current
 
+- [x] task022: freeze the common Runtime provider/model boundary, implement
+  DSH-native multi-provider configuration and current-Session model selection,
+  replace hard-coded DeepSeek credential preflight with selected-route
+  readiness, and preserve interfaces for later configuration-file adapters.
+  DSH is the only Runtime changed in this task. Implementation, low-memory
+  Go/Web gates, authenticated model-selection smoke and bounded ASD deployment
+  are complete; independent review and the human custom-provider/Turn smoke
+  remain tracked release evidence.
+
 - [x] task021: align current/default Session permissions with enforced Remote
   policy, add value-free DSH credential readiness and same-Session recovery,
   repair replay ordering/collapse-all, add archive/delete management, and expose

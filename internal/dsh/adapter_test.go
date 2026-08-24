@@ -188,6 +188,31 @@ func (fixture *dshFixture) serveHTTP(writer http.ResponseWriter, request *http.R
 			credential["source"] = "file"
 		}
 		value = map[string]any{"credentials": map[string]any{CredentialReference: credential}}
+	case "llm.providers":
+		value = map[string]any{"providers": []map[string]any{{
+			"provider": deepSeekProviderRoute, "displayName": "DeepSeek",
+			"settingsNs": deepSeekSettingsNamespace, "settingsPath": []string{}, "active": true,
+		}}}
+	case "settings.describe":
+		value = map[string]any{
+			"writable": true, "hasDocument": true,
+			"namespaces": []map[string]any{{
+				"ns": deepSeekSettingsNamespace, "schema": map[string]any{},
+				"value": map[string]any{"apiKeyEnv": CredentialReference},
+				"base":  map[string]any{}, "user": map[string]any{}, "applies": "live",
+				"secrets": []any{}, "revision": 0,
+			}},
+		}
+	case "session.models":
+		value = map[string]any{
+			"current":  map[string]any{"provider": deepSeekProviderRoute, "model": "deepseek-v4-flash"},
+			"routable": true,
+			"groups": []map[string]any{{
+				"id": deepSeekProviderRoute, "name": "DeepSeek",
+				"models": []map[string]any{{"id": "deepseek-v4-flash", "name": "DeepSeek V4 Flash"}},
+			}},
+			"failures": []any{},
+		}
 	case "session.create":
 		var payload map[string]any
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
@@ -240,7 +265,8 @@ func TestCredentialStatusAndTurnPreflightAreValueFreeAndRecoverable(t *testing.T
 		t.Fatalf("missing credential status=%#v err=%v", status, err)
 	}
 	var adapterError *agent.AdapterError
-	if err := adapter.PreflightTurn(context.Background()); !errors.As(err, &adapterError) || adapterError.Code != "credential_required" {
+	request := agent.RunRequest{ExternalSessionID: "ses_credential_status"}
+	if err := adapter.PreflightTurn(context.Background(), request); !errors.As(err, &adapterError) || adapterError.Code != "credential_required" {
 		t.Fatalf("missing credential preflight=%v", err)
 	}
 	if err := adapter.ConfigureCredential(context.Background(), "sk-private-test"); err != nil {
@@ -250,7 +276,7 @@ func TestCredentialStatusAndTurnPreflightAreValueFreeAndRecoverable(t *testing.T
 	if err != nil || !status.Configured || !status.Writable {
 		t.Fatalf("configured credential status=%#v err=%v", status, err)
 	}
-	if err := adapter.PreflightTurn(context.Background()); err != nil {
+	if err := adapter.PreflightTurn(context.Background(), request); err != nil {
 		t.Fatalf("configured credential preflight=%v", err)
 	}
 	encoded, err := json.Marshal(status)

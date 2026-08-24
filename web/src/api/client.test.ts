@@ -70,6 +70,43 @@ describe('API client', () => {
     ])
   })
 
+  it('uses generic redacted Runtime provider and per-Session model endpoints', async () => {
+    const runtime = {
+      id: 'dsh', display_name: 'DeepSeek Harness', writable: true, custom_provider_revision: 8,
+      protocols: ['openai-completions'], providers: [],
+    }
+    const models = {
+      current: { provider: 'acme-gateway', model: 'qwen-coder', reasoning_effort: 'medium' },
+      routable: true, groups: [], failures: [], current_credential: { configured: true, writable: true },
+    }
+    const mutation = {
+      expected_revision: 8, display_name: 'Acme', base_url: 'https://gateway.example/v1',
+      api: 'openai-completions', models_overridden: true,
+      models: [{ id: 'qwen-coder', context_window: 65536 }], api_key: 'sk-write-only',
+    }
+    const selection = { provider: 'acme-gateway', model: 'qwen-coder', reasoning_effort: 'high' }
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(jsonResponse({ runtime }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(jsonResponse(models))
+      .mockResolvedValueOnce(jsonResponse({ selected: selection }))
+
+    await expect(api.runtimeProviders('dsh')).resolves.toEqual(runtime)
+    await api.configureRuntimeProvider('dsh', 'acme-gateway', mutation)
+    await api.removeRuntimeProvider('dsh', 'acme-gateway', 9)
+    await expect(api.agentSessionModels('ags_models')).resolves.toEqual(models)
+    await expect(api.selectAgentSessionModel('ags_models', selection)).resolves.toEqual(selection)
+
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method ?? 'GET', init?.body])).toEqual([
+      ['/api/v1/agent-runtimes/dsh/providers', 'GET', undefined],
+      ['/api/v1/agent-runtimes/dsh/providers/acme-gateway', 'PUT', JSON.stringify(mutation)],
+      ['/api/v1/agent-runtimes/dsh/providers/acme-gateway', 'DELETE', JSON.stringify({ expected_revision: 9 })],
+      ['/api/v1/agent-sessions/ags_models/models', 'GET', undefined],
+      ['/api/v1/agent-sessions/ags_models/models', 'PATCH', JSON.stringify(selection)],
+    ])
+  })
+
   it('archives, restores and deletes a Session through bounded management endpoints', async () => {
     const archived = [{
       id: 'ags_archived', device_id: 'dev_one', device_name: 'Remote', approval_mode: 'per_command', provider: 'dsh',

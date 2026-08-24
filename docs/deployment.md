@@ -78,9 +78,16 @@ sh deploy/check-dsh-runtime.sh \
 至少 32 字节，Host URL、Bridge listener 和 callback URL 必须精确对应 loopback。
 配置字段见 [.env.example](../.env.example)。
 
-管理员可在认证后的 Controller“设置 → Agent 与模型”写入 DeepSeek API Key。Key 仅
-进入 Server 上 mode `0600` 的 DSH credential store，不返回 Browser，也不进入
-AISummoner SQLite、日志或审计。
+管理员可在认证后的 Controller“设置 → Agent 与模型 → 模型供应商”配置 DSH 官方
+供应商、内置兼容供应商或自定义 OpenAI/Anthropic 兼容网关。API Key 仅进入 Server
+上 mode `0600` 的 DSH credential store，不返回 Browser，也不进入 AISummoner
+SQLite、日志或审计。自定义 Base URL 只接受 HTTPS；只有与 Server 明确同机部署的
+服务可使用数值 loopback HTTP。
+
+Agent 输入框左下角显示当前 DSH 模型。选择供应商、模型或该模型声明的推理强度只
+作用于当前 DSH Session 的下一步，并沿用同一个 AISummoner 对话；Provider Settings
+和 Session 模型选择不是同一个全局开关。配置冲突会要求刷新，不会覆盖另一个页面
+刚提交的修改。
 
 ## 4. Headless Remote systemd
 

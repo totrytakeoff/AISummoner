@@ -251,6 +251,42 @@ input::placeholder, textarea::placeholder { color: var(--caption); }
 .settings-provider-form label { font-size: 12px; font-weight: 500; }
 .settings-inline-form { display: flex; gap: 8px; }
 .settings-inline-form input { background: #fff; }
+.runtime-provider-list { display: grid; overflow: hidden; border: 1px solid var(--line); border-radius: 13px; }
+.runtime-provider-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 54px; padding: 8px 10px; border: 0; border-bottom: 1px solid var(--line-soft); background: #fff; text-align: left; cursor: pointer; }
+.runtime-provider-row:last-child { border-bottom: 0; }
+.runtime-provider-row:hover { background: var(--surface-hover); }
+.runtime-provider-row > span:nth-child(2) { display: grid; min-width: 0; gap: 2px; }
+.runtime-provider-row strong { overflow: hidden; font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-provider-row small { overflow: hidden; color: var(--tertiary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-provider-mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; color: var(--blue); background: var(--blue-soft); }
+.runtime-provider-mark svg { width: 15px; height: 15px; }
+.provider-add-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.provider-add-actions select, .provider-editor select { min-height: 34px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 9px; color: var(--text); background: #fff; font: inherit; font-size: 12px; }
+.provider-editor { display: grid; gap: 13px; padding: 15px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-subtle); }
+.provider-editor-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.provider-editor-heading > div { display: grid; gap: 2px; min-width: 0; }
+.provider-editor-heading strong { font-size: 14px; }
+.provider-editor-heading span { color: var(--tertiary); font-size: 11px; }
+.provider-editor > label, .provider-advanced-body > label, .provider-form-grid label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; }
+.provider-editor input { min-height: 36px; padding: 7px 9px; border-radius: 9px; background: #fff; font-size: 12px; }
+.provider-advanced { border-top: 1px solid var(--line-soft); padding-top: 10px; }
+.provider-advanced summary { width: fit-content; color: var(--muted); font-size: 11px; cursor: pointer; }
+.provider-advanced-body { display: grid; gap: 11px; padding-top: 12px; }
+.provider-model-toggle { display: flex !important; align-items: center; gap: 8px !important; }
+.provider-model-toggle input { width: 15px; min-height: 15px; }
+.provider-model-toggle > span { display: grid; }
+.provider-model-toggle strong { color: var(--text); font-size: 11px; font-weight: 500; }
+.provider-model-toggle small { color: var(--tertiary); font-size: 10px; }
+.provider-model-editor { display: grid; gap: 7px; }
+.provider-model-row { display: grid; grid-template-columns: minmax(96px, 1.1fr) minmax(82px, 1fr) 76px 76px 30px; gap: 6px; }
+.provider-model-row input { min-width: 0; }
+.provider-model-row .icon-button { align-self: center; }
+.provider-add-model { justify-self: start; }
+.provider-editor-actions { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 7px; border-top: 1px solid var(--line-soft); padding-top: 11px; }
+.provider-remove-confirm { display: flex; gap: 5px; }
+.provider-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.provider-form-grid .wide { grid-column: 1 / -1; }
+.provider-custom-models { display: grid; gap: 8px; font-size: 11px; }
 .permission-choice-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-top: 10px; }
 .permission-choice-list > button { display: grid; gap: 3px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; color: var(--text); background: #fff; text-align: left; cursor: pointer; }
 .permission-choice-list > button:hover:not(:disabled) { background: var(--surface-hover); }
@@ -465,6 +501,29 @@ input::placeholder, textarea::placeholder { color: var(--caption); }
 .composer-runtime:disabled { cursor: default; }
 .composer-runtime svg { width: 14px; height: 14px; }
 .composer-runtime span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-model-picker { position: relative; min-width: 0; }
+.model-menu { position: absolute; z-index: 22; bottom: calc(100% + 7px); left: 0; width: min(360px, calc(100vw - 32px)); overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: #fff; box-shadow: var(--shadow-2); }
+.model-menu > header { display: flex; align-items: center; justify-content: space-between; padding: 10px 11px 8px; border-bottom: 1px solid var(--line-soft); }
+.model-menu > header strong { font-size: 12px; }
+.model-menu > header span { color: var(--tertiary); font-size: 10px; }
+.model-menu-scroll { max-height: min(430px, 55vh); overflow-y: auto; padding: 5px; }
+.model-menu-group h4 { margin: 8px 8px 3px; color: var(--tertiary); font-size: 10px; font-weight: 500; }
+.model-menu-entry { border-radius: 9px; }
+.model-menu-entry[data-selected] { background: var(--surface-active); }
+.model-menu-entry > button { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 7px 8px; border: 0; border-radius: 9px; background: transparent; text-align: left; cursor: pointer; }
+.model-menu-entry > button:hover { background: var(--surface-hover); }
+.model-menu-entry > button > span { display: grid; min-width: 0; gap: 1px; }
+.model-menu-entry strong { overflow: hidden; font-size: 11px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.model-menu-entry small { overflow: hidden; color: var(--tertiary); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.model-menu-entry i { color: var(--blue); font-size: 11px; font-style: normal; }
+.model-effort-list { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px 7px; }
+.model-effort-list button { padding: 3px 7px; border: 0; border-radius: 6px; color: var(--muted); background: #fff; font-size: 9px; cursor: pointer; }
+.model-effort-list button[data-selected] { color: var(--blue); background: var(--blue-soft); }
+.model-menu-failure, .model-menu-empty { margin: 6px; padding: 7px; border-radius: 7px; color: var(--danger); background: var(--danger-soft); font-size: 10px; line-height: 16px; }
+.model-menu-empty { color: var(--tertiary); background: var(--surface-subtle); text-align: center; }
+.model-menu > footer { padding: 5px; border-top: 1px solid var(--line-soft); }
+.model-menu > footer button { width: 100%; padding: 7px 8px; border: 0; border-radius: 8px; color: var(--muted); background: transparent; font-size: 10px; text-align: left; cursor: pointer; }
+.model-menu > footer button:hover { color: var(--text); background: var(--surface-hover); }
 .composer-permission-picker { position: relative; min-width: 0; }
 .composer-permission { display: inline-flex; align-items: center; gap: 3px; max-width: 190px; height: 28px; overflow: hidden; padding: 0 7px; border: 0; border-radius: 8px; color: var(--tertiary); background: transparent; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .composer-permission:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); }
@@ -554,6 +613,10 @@ input::placeholder, textarea::placeholder { color: var(--caption); }
   .settings-options { padding-inline: 16px; }
   .settings-header { padding-left: 16px; }
   .settings-inline-form { flex-direction: column; }
+  .provider-form-grid { grid-template-columns: 1fr; }
+  .provider-form-grid .wide { grid-column: auto; }
+  .provider-model-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 30px; }
+  .provider-model-row input:nth-child(1), .provider-model-row input:nth-child(2) { grid-column: 1 / -1; }
   .settings-metadata { grid-template-columns: 1fr; }
   .settings-danger-zone { grid-template-columns: 1fr; }
   .permission-choice-list { grid-template-columns: 1fr; }

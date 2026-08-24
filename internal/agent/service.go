@@ -82,12 +82,13 @@ type Service struct {
 	rootCtx context.Context
 	cancel  context.CancelFunc
 
-	mu       sync.Mutex
-	running  map[string]*runningTurn
-	pending  map[string]*pendingDecision
-	revoked  map[string]string
-	archived map[string]string
-	closed   bool
+	mu          sync.Mutex
+	running     map[string]*runningTurn
+	configuring map[string]struct{}
+	pending     map[string]*pendingDecision
+	revoked     map[string]string
+	archived    map[string]string
+	closed      bool
 
 	mutations sync.WaitGroup
 	turns     sync.WaitGroup
@@ -151,7 +152,8 @@ func NewService(options ServiceOptions) (*Service, error) {
 		executor: options.Executor, online: options.Online, auditor: options.Auditor,
 		logger: options.Logger, now: options.Now, turnTimeout: options.TurnTimeout,
 		approvalTimeout: options.ApprovalTimeout, hub: newEventHub(options.SubscriberBuffer),
-		rootCtx: rootCtx, cancel: cancel, running: make(map[string]*runningTurn), pending: make(map[string]*pendingDecision),
+		rootCtx: rootCtx, cancel: cancel, running: make(map[string]*runningTurn), configuring: make(map[string]struct{}),
+		pending: make(map[string]*pendingDecision),
 		revoked: make(map[string]string), archived: make(map[string]string),
 		closeDone: make(chan struct{}),
 	}, nil
@@ -193,6 +195,73 @@ func (s *Service) adapterForProvider(provider string) (Adapter, bool) {
 	defer s.mu.Unlock()
 	adapter, ok := s.adapters[provider]
 	return adapter, ok
+}
+
+// RuntimeProviderDirectory exposes an Adapter's optional Host-level provider
+// configuration capability without leaking the concrete Adapter through the
+// HTTP layer.
+func (s *Service) RuntimeProviderDirectory(ctx context.Context, runtime string) (RuntimeProviderDirectory, error) {
+	if len(runtime) > MaxRuntimeIDBytes || !validProvider(runtime) {
+		return RuntimeProviderDirectory{}, ErrNotFound
+	}
+	if err := s.beginMutation(); err != nil {
+		return RuntimeProviderDirectory{}, err
+	}
+	defer s.endMutation()
+	ctx, cancel := s.mutationContext(ctx)
+	defer cancel()
+	adapter, ok := s.adapterForProvider(runtime)
+	if !ok {
+		return RuntimeProviderDirectory{}, ErrNotFound
+	}
+	configurator, ok := adapter.(RuntimeConfigurationAdapter)
+	if !ok {
+		return RuntimeProviderDirectory{}, ErrNotFound
+	}
+	return configurator.ProviderDirectory(ctx)
+}
+
+func (s *Service) ConfigureRuntimeProvider(ctx context.Context, runtime string, mutation RuntimeProviderMutation) error {
+	if len(runtime) > MaxRuntimeIDBytes || !validProvider(runtime) || validateRuntimeProviderMutation(mutation) != nil {
+		return ErrInvalidRequest
+	}
+	if err := s.beginMutation(); err != nil {
+		return err
+	}
+	defer s.endMutation()
+	ctx, cancel := s.mutationContext(ctx)
+	defer cancel()
+	adapter, ok := s.adapterForProvider(runtime)
+	if !ok {
+		return ErrNotFound
+	}
+	configurator, ok := adapter.(RuntimeConfigurationAdapter)
+	if !ok {
+		return ErrNotFound
+	}
+	return configurator.ConfigureProvider(ctx, mutation)
+}
+
+func (s *Service) RemoveRuntimeProvider(ctx context.Context, runtime, provider string, expectedRevision int64) error {
+	if len(runtime) > MaxRuntimeIDBytes || !validProvider(runtime) || len(provider) > MaxProviderIDBytes ||
+		!validProvider(provider) || expectedRevision < 0 {
+		return ErrInvalidRequest
+	}
+	if err := s.beginMutation(); err != nil {
+		return err
+	}
+	defer s.endMutation()
+	ctx, cancel := s.mutationContext(ctx)
+	defer cancel()
+	adapter, ok := s.adapterForProvider(runtime)
+	if !ok {
+		return ErrNotFound
+	}
+	configurator, ok := adapter.(RuntimeConfigurationAdapter)
+	if !ok {
+		return ErrNotFound
+	}
+	return configurator.RemoveProvider(ctx, provider, expectedRevision)
 }
 
 func (s *Service) Close() {
@@ -291,6 +360,109 @@ func (s *Service) Snapshot(ctx context.Context, ownerUserID, sessionID string) (
 		return store.AgentSnapshot{}, mapStoreNotFound(err)
 	}
 	return value, nil
+}
+
+// SessionModels lazily prepares the Runtime Session, persists its opaque ID,
+// and returns the Runtime-owned model directory. Model operations and Turn
+// admission are mutually exclusive for one product Session.
+func (s *Service) SessionModels(ctx context.Context, ownerUserID, sessionID string) (ModelDirectory, error) {
+	if err := s.beginMutation(); err != nil {
+		return ModelDirectory{}, err
+	}
+	defer s.endMutation()
+	ctx, cancel := s.mutationContext(ctx)
+	defer cancel()
+	runtime, externalID, release, err := s.prepareRuntimeSession(ctx, ownerUserID, sessionID)
+	if err != nil {
+		return ModelDirectory{}, err
+	}
+	defer release()
+	return runtime.Models(ctx, externalID)
+}
+
+func (s *Service) SelectSessionModel(ctx context.Context, ownerUserID, sessionID string, selection ModelSelection) (ModelSelection, error) {
+	if !validModelSelection(selection) {
+		return ModelSelection{}, ErrInvalidRequest
+	}
+	if err := s.beginMutation(); err != nil {
+		return ModelSelection{}, err
+	}
+	defer s.endMutation()
+	ctx, cancel := s.mutationContext(ctx)
+	defer cancel()
+	runtime, externalID, release, err := s.prepareRuntimeSession(ctx, ownerUserID, sessionID)
+	if err != nil {
+		return ModelSelection{}, err
+	}
+	defer release()
+	return runtime.SelectModel(ctx, externalID, selection)
+}
+
+func (s *Service) prepareRuntimeSession(ctx context.Context, ownerUserID, sessionID string) (RuntimeSessionAdapter, string, func(), error) {
+	session, err := s.store.AgentSessionByOwner(ctx, ownerUserID, sessionID)
+	if err != nil {
+		return nil, "", nil, mapStoreNotFound(err)
+	}
+	adapter, ok := s.adapterForProvider(session.Provider)
+	if !ok {
+		return nil, "", nil, &AdapterError{Code: "provider_unavailable", Err: errors.New("agent provider is unavailable")}
+	}
+	runtime, ok := adapter.(RuntimeSessionAdapter)
+	if !ok {
+		return nil, "", nil, ErrNotFound
+	}
+	if err := s.reserveSessionConfiguration(session.ID); err != nil {
+		return nil, "", nil, err
+	}
+	release := func() { s.releaseSessionConfiguration(session.ID) }
+	externalID := ""
+	if session.ExternalSessionID != nil {
+		externalID = *session.ExternalSessionID
+	}
+	preparedID, err := runtime.PrepareSession(ctx, externalID)
+	if err != nil {
+		release()
+		return nil, "", nil, err
+	}
+	if preparedID == "" {
+		release()
+		return nil, "", nil, &AdapterError{Code: "protocol_error", Err: errors.New("runtime returned an empty Session ID")}
+	}
+	if preparedID != externalID {
+		if err := s.store.UpdateAgentExternalSessionID(ctx, ownerUserID, session.ID, preparedID, s.now().UTC()); err != nil {
+			release()
+			return nil, "", nil, mapStoreNotFound(err)
+		}
+	}
+	return runtime, preparedID, release, nil
+}
+
+func (s *Service) reserveSessionConfiguration(sessionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return ErrServiceClosed
+	}
+	if _, revoked := s.revoked[sessionID]; revoked {
+		return ErrNotFound
+	}
+	if _, archived := s.archived[sessionID]; archived {
+		return ErrNotFound
+	}
+	if _, running := s.running[sessionID]; running {
+		return ErrTurnInProgress
+	}
+	if _, configuring := s.configuring[sessionID]; configuring {
+		return ErrTurnInProgress
+	}
+	s.configuring[sessionID] = struct{}{}
+	return nil
+}
+
+func (s *Service) releaseSessionConfiguration(sessionID string) {
+	s.mu.Lock()
+	delete(s.configuring, sessionID)
+	s.mu.Unlock()
 }
 
 func (s *Service) LatestSnapshot(ctx context.Context, ownerUserID, deviceID string) (store.AgentSnapshot, error) {
@@ -441,11 +613,6 @@ func (s *Service) StartTurn(ctx context.Context, ownerUserID, sessionID, content
 	if !ok {
 		return store.AgentMessage{}, &AdapterError{Code: "provider_unavailable", Err: errors.New("agent provider is unavailable")}
 	}
-	if preflight, supportsPreflight := adapter.(TurnPreflighter); supportsPreflight {
-		if err := preflight.PreflightTurn(ctx); err != nil {
-			return store.AgentMessage{}, err
-		}
-	}
 	turnCtx, cancel := context.WithTimeout(s.rootCtx, s.turnTimeout)
 	if err := s.reserveTurn(session, ownerUserID, cancel); err != nil {
 		cancel()
@@ -458,6 +625,31 @@ func (s *Service) StartTurn(ctx context.Context, ownerUserID, sessionID, content
 			s.releaseTurn(session.ID)
 		}
 	}()
+	externalSessionID := ""
+	if session.ExternalSessionID != nil {
+		externalSessionID = *session.ExternalSessionID
+	}
+	if runtime, supportsRuntimeSession := adapter.(RuntimeSessionAdapter); supportsRuntimeSession {
+		preparedID, prepareErr := runtime.PrepareSession(ctx, externalSessionID)
+		if prepareErr != nil {
+			return store.AgentMessage{}, prepareErr
+		}
+		if preparedID == "" {
+			return store.AgentMessage{}, &AdapterError{Code: "protocol_error", Err: errors.New("runtime returned an empty Session ID")}
+		}
+		if preparedID != externalSessionID {
+			if err := s.store.UpdateAgentExternalSessionID(ctx, ownerUserID, session.ID, preparedID, s.now().UTC()); err != nil {
+				return store.AgentMessage{}, mapStoreNotFound(err)
+			}
+			externalSessionID = preparedID
+		}
+	}
+	request := RunRequest{SessionID: session.ID, ExternalSessionID: externalSessionID, UserText: content}
+	if preflight, supportsPreflight := adapter.(TurnPreflighter); supportsPreflight {
+		if err := preflight.PreflightTurn(ctx, request); err != nil {
+			return store.AgentMessage{}, err
+		}
+	}
 	messageID, err := id.New("msg")
 	if err != nil {
 		return store.AgentMessage{}, err
@@ -503,6 +695,9 @@ func (s *Service) reserveTurn(session store.AgentSession, ownerUserID string, ca
 		return ErrNotFound
 	}
 	if _, exists := s.running[session.ID]; exists {
+		return ErrTurnInProgress
+	}
+	if _, exists := s.configuring[session.ID]; exists {
 		return ErrTurnInProgress
 	}
 	// Add is protected by the same mutex/closed gate as Close.
@@ -1444,6 +1639,47 @@ func validProvider(provider string) bool {
 		}
 	}
 	return true
+}
+
+func validateRuntimeProviderMutation(mutation RuntimeProviderMutation) error {
+	if len(mutation.Provider) > MaxProviderIDBytes || !validProvider(mutation.Provider) || mutation.ExpectedRevision < 0 ||
+		!validOptionalRuntimeText(mutation.DisplayName, MaxDisplayNameBytes) ||
+		!validOptionalRuntimeText(mutation.BaseURL, MaxBaseURLBytes) ||
+		!validOptionalRuntimeText(mutation.API, MaxReasoningIDBytes) || len(mutation.APIKey) > 4096 ||
+		len(mutation.Models) > MaxProviderModels {
+		return ErrInvalidRequest
+	}
+	if !mutation.ModelsOverridden {
+		if len(mutation.Models) != 0 {
+			return ErrInvalidRequest
+		}
+		return nil
+	}
+	seen := make(map[string]struct{}, len(mutation.Models))
+	for _, model := range mutation.Models {
+		if !validRuntimeText(model.ID, MaxModelIDBytes) || !validOptionalRuntimeText(model.Name, MaxDisplayNameBytes) ||
+			model.ContextWindow < 0 || model.MaxTokens < 0 {
+			return ErrInvalidRequest
+		}
+		if _, duplicate := seen[model.ID]; duplicate {
+			return ErrInvalidRequest
+		}
+		seen[model.ID] = struct{}{}
+	}
+	return nil
+}
+
+func validModelSelection(selection ModelSelection) bool {
+	return validRuntimeText(selection.Provider, MaxProviderIDBytes) && validRuntimeText(selection.Model, MaxModelIDBytes) &&
+		validOptionalRuntimeText(selection.ReasoningEffort, MaxReasoningIDBytes)
+}
+
+func validRuntimeText(value string, maximum int) bool {
+	return value != "" && len(value) <= maximum && utf8.ValidString(value) && strings.TrimSpace(value) == value
+}
+
+func validOptionalRuntimeText(value string, maximum int) bool {
+	return value == "" || validRuntimeText(value, maximum)
 }
 
 func stableFailureCode(code string) string {

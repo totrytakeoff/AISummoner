@@ -33,7 +33,85 @@ type recoverablePreflightAdapter struct {
 	runs       chan RunRequest
 }
 
-func (adapter *recoverablePreflightAdapter) PreflightTurn(context.Context) error {
+type runtimeSessionProbe struct {
+	mu sync.Mutex
+
+	prepareEntered chan struct{}
+	prepareRelease <-chan struct{}
+	prepareOnce    sync.Once
+	runEntered     chan struct{}
+	runRelease     <-chan struct{}
+	runOnce        sync.Once
+
+	prepareIDs []string
+	modelIDs   []string
+	selections []ModelSelection
+	runs       []RunRequest
+}
+
+func (probe *runtimeSessionProbe) PrepareSession(ctx context.Context, externalID string) (string, error) {
+	probe.mu.Lock()
+	probe.prepareIDs = append(probe.prepareIDs, externalID)
+	probe.mu.Unlock()
+	if probe.prepareEntered != nil {
+		probe.prepareOnce.Do(func() { close(probe.prepareEntered) })
+	}
+	if probe.prepareRelease != nil {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-probe.prepareRelease:
+		}
+	}
+	if externalID != "" {
+		return externalID, nil
+	}
+	return "ses_service_models", nil
+}
+
+func (probe *runtimeSessionProbe) Models(_ context.Context, externalID string) (ModelDirectory, error) {
+	probe.mu.Lock()
+	probe.modelIDs = append(probe.modelIDs, externalID)
+	probe.mu.Unlock()
+	return ModelDirectory{
+		Current: ModelSelection{Provider: "provider-one", Model: "model-one"}, Routable: true,
+		Groups: []ModelProviderGroup{{ID: "provider-one", Name: "Provider One", Models: []RuntimeModel{{ID: "model-one", Name: "Model One"}}}},
+	}, nil
+}
+
+func (probe *runtimeSessionProbe) SelectModel(_ context.Context, externalID string, selection ModelSelection) (ModelSelection, error) {
+	probe.mu.Lock()
+	probe.modelIDs = append(probe.modelIDs, externalID)
+	probe.selections = append(probe.selections, selection)
+	probe.mu.Unlock()
+	return selection, nil
+}
+
+func (probe *runtimeSessionProbe) Run(ctx context.Context, request RunRequest, sink EventSink) error {
+	probe.mu.Lock()
+	probe.runs = append(probe.runs, request)
+	probe.mu.Unlock()
+	if probe.runEntered != nil {
+		probe.runOnce.Do(func() { close(probe.runEntered) })
+	}
+	if probe.runRelease != nil {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-probe.runRelease:
+		}
+	}
+	return sink.TextDelta(ctx, "runtime response")
+}
+
+func (probe *runtimeSessionProbe) snapshot() (prepareIDs, modelIDs []string, selections []ModelSelection, runs []RunRequest) {
+	probe.mu.Lock()
+	defer probe.mu.Unlock()
+	return append([]string(nil), probe.prepareIDs...), append([]string(nil), probe.modelIDs...),
+		append([]ModelSelection(nil), probe.selections...), append([]RunRequest(nil), probe.runs...)
+}
+
+func (adapter *recoverablePreflightAdapter) PreflightTurn(context.Context, RunRequest) error {
 	if !adapter.configured.Load() {
 		return &AdapterError{Code: "credential_required", Err: errors.New("credential is not configured")}
 	}
@@ -1602,6 +1680,117 @@ func TestCredentialPreflightDoesNotPersistAndConfiguredRetryReusesSession(t *tes
 	default:
 		t.Fatal("configured retry never reached the Adapter")
 	}
+}
+
+func TestRuntimeSessionModelsPersistOpaqueIDAndSelectionFeedsTheNextTurn(t *testing.T) {
+	adapter := &runtimeSessionProbe{}
+	fixture := newServiceFixture(t, adapter, time.Second, nil)
+	if err := fixture.service.SetAdapter(ProviderDSH, adapter); err != nil {
+		t.Fatal(err)
+	}
+	session := fixture.createSession(store.AgentApprovalFullAccess)
+	if _, err := fixture.service.SelectSessionModel(context.Background(), fixture.ownerID, session.ID, ModelSelection{
+		Provider: "provider-one", Model: " model-one",
+	}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("invalid model selection error=%v", err)
+	}
+	before, err := fixture.service.Snapshot(context.Background(), fixture.ownerID, session.ID)
+	if err != nil || before.Session.ExternalSessionID != nil {
+		t.Fatalf("invalid selection prepared a Runtime Session: external=%#v err=%v", before.Session.ExternalSessionID, err)
+	}
+	directory, err := fixture.service.SessionModels(context.Background(), fixture.ownerID, session.ID)
+	if err != nil || directory.Current.Model != "model-one" {
+		t.Fatalf("models=%#v err=%v", directory, err)
+	}
+	snapshot, err := fixture.service.Snapshot(context.Background(), fixture.ownerID, session.ID)
+	if err != nil || snapshot.Session.ExternalSessionID == nil || *snapshot.Session.ExternalSessionID != "ses_service_models" {
+		t.Fatalf("persisted Runtime Session=%#v err=%v", snapshot.Session.ExternalSessionID, err)
+	}
+	selection := ModelSelection{Provider: "provider-one", Model: "model-one"}
+	selected, err := fixture.service.SelectSessionModel(context.Background(), fixture.ownerID, session.ID, selection)
+	if err != nil || selected != selection {
+		t.Fatalf("selected=%#v err=%v", selected, err)
+	}
+	if _, err := fixture.service.StartTurn(context.Background(), fixture.ownerID, session.ID, "use selected model"); err != nil {
+		t.Fatal(err)
+	}
+	waitSnapshot(t, fixture.service, fixture.ownerID, session.ID, store.AgentSessionIdle)
+	prepareIDs, modelIDs, selections, runs := adapter.snapshot()
+	if len(prepareIDs) != 3 || prepareIDs[0] != "" || prepareIDs[1] != "ses_service_models" || prepareIDs[2] != "ses_service_models" ||
+		len(modelIDs) != 2 || modelIDs[0] != "ses_service_models" || modelIDs[1] != "ses_service_models" ||
+		len(selections) != 1 || selections[0] != selection || len(runs) != 1 || runs[0].ExternalSessionID != "ses_service_models" {
+		t.Fatalf("prepare=%v models=%v selections=%#v runs=%#v", prepareIDs, modelIDs, selections, runs)
+	}
+}
+
+func TestRuntimeProviderMutationCommonBounds(t *testing.T) {
+	valid := RuntimeProviderMutation{
+		Provider: "provider-one", ExpectedRevision: 1, BaseURL: "https://provider.example/v1",
+		ModelsOverridden: true, Models: []RuntimeProviderModel{{ID: "model-one", ContextWindow: 8192}},
+	}
+	if err := validateRuntimeProviderMutation(valid); err != nil {
+		t.Fatalf("valid mutation error=%v", err)
+	}
+	for _, mutation := range []RuntimeProviderMutation{
+		{Provider: "provider-one", ExpectedRevision: -1},
+		{Provider: "provider-one", ExpectedRevision: 1, Models: []RuntimeProviderModel{{ID: "model-one"}}},
+		{Provider: "provider-one", ExpectedRevision: 1, ModelsOverridden: true, Models: []RuntimeProviderModel{{ID: "duplicate"}, {ID: "duplicate"}}},
+		{Provider: "provider-one", ExpectedRevision: 1, APIKey: strings.Repeat("k", 4097)},
+	} {
+		if err := validateRuntimeProviderMutation(mutation); !errors.Is(err, ErrInvalidRequest) {
+			t.Fatalf("invalid mutation accepted: %#v err=%v", mutation, err)
+		}
+	}
+}
+
+func TestSessionModelMutationAndTurnAdmissionAreMutuallyExclusive(t *testing.T) {
+	prepareEntered := make(chan struct{})
+	prepareRelease := make(chan struct{})
+	adapter := &runtimeSessionProbe{prepareEntered: prepareEntered, prepareRelease: prepareRelease}
+	fixture := newServiceFixture(t, adapter, time.Second, nil)
+	if err := fixture.service.SetAdapter(ProviderDSH, adapter); err != nil {
+		t.Fatal(err)
+	}
+	session := fixture.createSession(store.AgentApprovalFullAccess)
+	modelsDone := make(chan error, 1)
+	go func() {
+		_, err := fixture.service.SessionModels(context.Background(), fixture.ownerID, session.ID)
+		modelsDone <- err
+	}()
+	select {
+	case <-prepareEntered:
+	case <-time.After(time.Second):
+		t.Fatal("model preparation did not enter")
+	}
+	if _, err := fixture.service.StartTurn(context.Background(), fixture.ownerID, session.ID, "must not race"); !errors.Is(err, ErrTurnInProgress) {
+		t.Fatalf("Turn admitted during model preparation: %v", err)
+	}
+	blockedSnapshot, err := fixture.service.Snapshot(context.Background(), fixture.ownerID, session.ID)
+	if err != nil || len(blockedSnapshot.Messages) != 0 {
+		t.Fatalf("blocked Turn persisted messages: %#v err=%v", blockedSnapshot.Messages, err)
+	}
+	close(prepareRelease)
+	if err := <-modelsDone; err != nil {
+		t.Fatal(err)
+	}
+
+	runEntered := make(chan struct{})
+	runRelease := make(chan struct{})
+	adapter.runEntered = runEntered
+	adapter.runRelease = runRelease
+	if _, err := fixture.service.StartTurn(context.Background(), fixture.ownerID, session.ID, "hold the Turn"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-runEntered:
+	case <-time.After(time.Second):
+		t.Fatal("Runtime Turn did not enter")
+	}
+	if _, err := fixture.service.SessionModels(context.Background(), fixture.ownerID, session.ID); !errors.Is(err, ErrTurnInProgress) {
+		t.Fatalf("model operation admitted during Turn: %v", err)
+	}
+	close(runRelease)
+	waitSnapshot(t, fixture.service, fixture.ownerID, session.ID, store.AgentSessionIdle)
 }
 
 func TestSessionPermissionUpdateIsAuthoritativeAndConflictsWithRunningTurn(t *testing.T) {
