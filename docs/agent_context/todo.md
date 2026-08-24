@@ -58,6 +58,9 @@ updated_by: planner
 
 ## Next
 
+- [x] Publish the first Controller milestone to the public GitHub repository
+  with a concise README, documentation index, quick-start/deployment guides,
+  public roadmap, contribution guide and security policy.
 - [ ] Independently review Task021; the deployed Controller milestone has
   already received human product acceptance.
 
@@ -81,8 +84,8 @@ updated_by: planner
 
 - Task014 remains human-accepted but its independent review record is not
   fabricated.
-- Current ASD deployment and CLI AppImage remain rollback/test assets, not the
-  final Qt distribution.
+- Current ASD deployment, CLI AppImage and Qt AppImage remain Alpha test/
+  rollback assets; no stable GitHub Release is claimed yet.
 - The earlier detailed Controller task draft is superseded, not implemented;
   its product requirements remain in Baseline 04.
 

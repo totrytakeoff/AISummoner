@@ -9,13 +9,14 @@ review_required: true
 
 ## Current Shape
 
-The current tree is a proved MVP vertical slice moving into Alpha. The Go
+The current tree is a proved MVP vertical slice with its first usable Alpha
+clients. The Go
 Server is the authoritative control plane and the Go Remote Client supplies
 outbound Tunnel/SSH execution. The Browser now has one DSH-first Device
 Workspace with Session, Agent and optional tool zones; old Device, Terminal and
 Agent paths are migration redirects. Agent sessions, approvals and ordered
-events remain Server-owned; Fake, OpenCode and direct DeepSeek use the same
-Remote execution boundary.
+events remain Server-owned; DSH, Fake, OpenCode and direct DeepSeek use the
+same Remote execution boundary.
 
 The strongest reusable assets are the trust chain, owner-scoped persistence,
 Tunnel/SSH lifecycle, Terminal data plane, Qt Remote GUI and the source-aligned
@@ -115,9 +116,9 @@ the daemon. GUI exit and daemon disconnect are distinct state transitions.
    add the Qt 6 Widgets GUI/AppImage while retaining headless mode.
 2. Add the Controller workspace shell and bounded Session index while embedding
    the current Agent/Terminal behavior as reusable surfaces. **Completed.**
-3. Establish the source-aligned DSH presentation/Settings baseline, then
-   introduce event v2/capabilities behind translation from existing events and
-   add the real DSH Runtime Adapter. **Presentation baseline completed.**
+3. Establish the source-aligned DSH presentation/Settings baseline and the real
+   DSH Runtime Adapter. **First end-to-end DSH slice completed.** Event v2,
+   capabilities and richer native actions remain incremental work.
 4. Enrich OpenCode, then add Codex and Claude using the same contracts.
 5. Add structured file/diff and Desktop capabilities only through separate ADRs.
 
@@ -144,8 +145,9 @@ bounded compatibility period.
   across Ubuntu versions. Keep daemon/IPC toolkit-neutral, use Qt Widgets rather
   than WebEngine, and require AppImage tests on the oldest supported Ubuntu.
 - **Credential proliferation**: multiple runtimes introduce API keys/OAuth.
-  Keep secrets server-side, never return them, and design encrypted/reference
-  storage before replacing the current memory-only setup.
+  Keep secrets server-side and never return them. DSH currently uses a private
+  mode-0600 credential store; future multi-Runtime profiles still need a common
+  encrypted/reference design.
 - **Event growth**: replayable Session logs can grow without limit. Add cursor,
   snapshot/compaction and byte policies before long-running sessions become the
   default.

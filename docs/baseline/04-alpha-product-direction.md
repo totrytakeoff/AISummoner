@@ -5,6 +5,20 @@
 - 适用阶段：MVP-0 之后的 Alpha 开发
 - 决策来源：用户确认的产品方向与 MVP 实测反馈
 
+## 0. 进展快照（2026-08-24）
+
+本文件第 2 节保留了方向冻结时的问题快照。此后已经完成：
+
+- Go Remote daemon、同 UID 私有 IPC、Qt 6 Widgets GUI 与 Linux AppImage；
+- Device Hub → 三栏 Control Workspace 和 DSH-first Controller 基线；
+- 真实 DSH Host/Adapter/Capability Bridge → Remote SSH 链路；
+- Session 权限、缺失凭据恢复、有序 replay、命令折叠与归档/删除。
+
+用户已接受“控制端初具雏形”的阶段性成果。仍未完成的是标准事件 v2、完整 DSH
+原生交互、OpenCode/Codex/Claude Code 丰富适配，以及 Windows Remote Client。
+实时进度以 [公开 Roadmap](../roadmap.md) 和
+[`agent_context/roadmap.md`](../agent_context/roadmap.md) 为准。
+
 ## 1. 定位
 
 MVP-0 已经证明下列纵向链路能够工作：

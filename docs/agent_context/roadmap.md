@@ -55,10 +55,14 @@ updated_by: planner
 - [x] task018: replace the legacy Controller visual/interaction layer with the
   pinned DSH-first shell, conversation, composer and Settings baseline; retire
   the standalone Device Manage page.
+- [x] task019: unify the optional component dock and localize the Controller.
+- [x] task020: real DSH Host/Adapter/Capability Bridge → Remote SSH chain.
+- [x] task021: Session permission, credential recovery, ordered replay,
+  collapse-all, archive/delete and global Settings parity.
 - [ ] Standard event v2, Capability Descriptor and Runtime Session lifecycle.
 - [ ] DSH-inspired conversation nodes, tool renderers, planning/question/status,
   cancel/steer/retry/queue and richer Markdown/code/diff UX.
-- [ ] Pinned DSH adapter with Server-local tools disabled and AISummoner Remote
+- [x] Pinned DSH adapter with Server-local tools disabled and AISummoner Remote
   capabilities injected.
 
 ## Alpha A5-A7: Runtime Adapters
@@ -71,9 +75,12 @@ updated_by: planner
 
 ## Alpha A8 And Later
 
+- [ ] Windows Remote Client: named-pipe IPC, service/background lifecycle,
+  ConPTY/process-tree cleanup and signed packaging behind a platform ADR.
 - [ ] Structured Remote file read/search/write/patch/diff.
 - [ ] Remote local restrictive permissions.
 - [ ] Desktop viewing/input only after a dedicated threat model and ADR.
+- [ ] macOS Remote Client only after the Windows platform seam is proven.
 - [ ] Multi-user/RBAC, clustering, port forwarding and arbitrary IDE docking
   remain separate future programs.
 

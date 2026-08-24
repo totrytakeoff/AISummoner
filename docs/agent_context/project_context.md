@@ -8,16 +8,18 @@ updated_by: planner
 
 ## Purpose
 
-AISummoner is a browser-controlled, server-side Agent and SSH remote execution platform. A Linux Remote Client initiates an outbound WSS connection to a single Server. The browser pairs devices, opens a terminal, and drives a provider-neutral Agent that can execute only against the bound Remote. MVP-0 has proved this vertical slice; Alpha now turns the Browser and Remote CLI prototypes into coherent clients and adds a capability-driven Agent Runtime layer.
+AISummoner is a browser-controlled, server-side Agent and SSH remote execution platform. A Linux Remote Client initiates an outbound WSS connection to a single Server. The browser pairs devices, opens a terminal, and drives a provider-neutral Agent that can execute only against the bound Remote. MVP-0 proved this vertical slice. Alpha now has a first usable DSH-first Controller and Qt Remote Client; the next work is richer Runtime compatibility and additional Remote platforms.
 
 ## Tech Stack
 
-- Language/runtime: Go for Server/Remote, TypeScript for WebUI and the OpenCode custom tool.
-- Frameworks: Go `net/http`, React/Vite, xterm.js.
+- Language/runtime: Go for Server/Remote, TypeScript for WebUI/Runtime tools,
+  and C++20 for the Qt Remote GUI.
+- Frameworks: Go `net/http`, React/Vite, xterm.js, Qt 6 Widgets.
 - Transport: HTTPS/WSS, coder/websocket, yamux, `x/crypto/ssh`, creack/pty.
 - Build system: Go modules, npm lockfile, Docker multi-stage build.
 - Test system: `go test`, Vitest, Playwright with one worker, shell-driven three-host smoke tests.
-- Storage/services: SQLite WAL via modernc.org/sqlite; direct HTTPS DeepSeek or a loopback OpenCode headless sidecar; Caddy deployment example.
+- Storage/services: SQLite WAL via modernc.org/sqlite; private loopback DSH,
+  direct HTTPS DeepSeek, Fake or loopback OpenCode; Caddy deployment example.
 
 ## Repository Map
 
@@ -25,6 +27,7 @@ AISummoner is a browser-controlled, server-side Agent and SSH remote execution p
 - `cmd/aisummoner-client/`: Remote Client executable.
 - `internal/`: Go packages owned by narrow tasks.
 - `web/`: React WebUI.
+- `desktop/remote-client/`: Qt Remote GUI.
 - `migrations/`: embedded SQLite migrations.
 - `deploy/`: Docker/Caddy and remote deployment assets.
 - `docs/baseline/`: authoritative behavior and acceptance baseline.
@@ -46,7 +49,10 @@ AISummoner is a browser-controlled, server-side Agent and SSH remote execution p
 
 ## Current Architecture Facts
 
-- Tasks001-010 are independently approved; Task011 produced the bounded ASD deployment and Linux AppImage; Tasks012-013 implemented the provider-neutral ordered Agent timeline and resumable conversation behavior; Task014 deployed direct DeepSeek with Web key entry and removed the cumulative Turn tool-count wall. The user confirmed the complete Terminal and Agent vertical slice on the real Remote and declared the MVP loop complete.
+- Tasks001-014 proved and deployed the MVP vertical slice. Tasks015-016 added
+  the Remote daemon/private IPC and Qt AppImage. Tasks017-021 produced the
+  DSH-first Controller workspace, real DSH Runtime chain, Session permission/
+  recovery/lifecycle behavior and the first human-accepted Controller milestone.
 - ADR-0001 fixes Go/React/WSS/yamux/Embedded SSHD/SQLite.
 - ADR-0002 replaced the original OpenAI Agent Loop with an OpenCode loopback sidecar plus a Fake Adapter for MVP-0.
 - ADR-0003 defines the provider-neutral Agent/Web seams and permits direct adapters such as DeepSeek without adding a second execution or session authority.
@@ -59,15 +65,17 @@ AISummoner is a browser-controlled, server-side Agent and SSH remote execution p
   Settings while keeping Experience and Runtime adapters separate.
 - Server is single-node and authoritative for user/device/session ownership.
 - Online Tunnel connections live only in memory.
-- OpenCode custom `remote_exec` calls a Go loopback bridge; the direct DeepSeek Adapter invokes the same Go `RemoteExecInvoker`. In both cases the target device is derived from the owned AISummoner Session, never model input.
+- DSH and OpenCode call a Go loopback Capability Bridge; direct DeepSeek uses
+  the same Go `RemoteExecInvoker`. In every case the target Device is derived
+  from the owned AISummoner Session, never model input.
 - Deterministic tests must not depend on OpenCode free-tier availability.
 - Legacy Controller routes remain safe migration redirects. The DSH-first
-  Workspace is now the target presentation baseline; its richer Runtime/event
-  contract remains Alpha work.
-- Task015/016 implemented the selected Qt 6 Widgets Remote Desktop Client and
-  a zero-configuration GUI+daemon AppImage. The local non-root live client is a
-  current test surface; combined independent review and target Ubuntu E2E remain
-  release evidence rather than an architecture unknown.
+  Workspace and real DSH execution chain are now the primary Alpha experience;
+  event v2, richer native actions and the other Runtime adapters remain work.
+- Task015/016 implemented the Qt 6 Widgets Remote Desktop Client and a
+  zero-configuration GUI+daemon AppImage. Linux is the only supported Remote
+  platform today; Windows requires a dedicated IPC/PTY/service design rather
+  than a blind cross-compile.
 
 ## Constraints
 
@@ -87,7 +95,9 @@ AISummoner is a browser-controlled, server-side Agent and SSH remote execution p
 
 ## Known Risks
 
-- Direct DeepSeek is the proven interactive Provider. Its key can be entered through the authenticated Web form and remains only in Server process memory; the previously exposed diagnostic credential remains ineligible.
+- DSH is the primary interactive Runtime. Its DeepSeek key is written only to
+  the private mode-0600 DSH credential store and is never returned to Browser,
+  SQLite, audit or logs. Direct DeepSeek remains a legacy compatibility path.
 - Local machine has no Go toolchain; use controlled Docker build or ASD-Host until installed.
 - lzr-host has only about 1.8 GiB MemAvailable and no swap; do not build Node/OpenCode there.
 - WSS byte-stream/yamux close semantics and Embedded SSHD PTY lifecycle are high-risk.
