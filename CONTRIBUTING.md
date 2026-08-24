@@ -69,5 +69,5 @@ AI 编码 Agent 可以使用 `docs/agent_context/` 做耐久交接，但最终 P
 
 ## License
 
-项目级许可证尚未确定。在许可证落地前，请不要假设公开仓库自动允许再分发；可以先
-通过 Issue/PR 贡献，第三方代码继续遵循其原许可证。
+AISummoner 采用 [MIT License](LICENSE)。提交贡献即表示你有权提交相关内容，并
+同意该贡献按同一 MIT License 发布；第三方代码仍必须遵循并保留其原许可证。

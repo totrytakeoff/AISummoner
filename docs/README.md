@@ -10,6 +10,8 @@
 - [公开 Roadmap](roadmap.md)：当前阶段、Runtime 顺序和跨平台计划。
 - [参与开发](../CONTRIBUTING.md)：环境、测试、提交与文档约束。
 - [安全策略](../SECURITY.md)：支持范围、报告方式和核心不变量。
+- [MIT License](../LICENSE) 与
+  [第三方声明](../THIRD_PARTY_NOTICES.md)：项目和移植代码的许可边界。
 
 ## 产品与架构基线
 

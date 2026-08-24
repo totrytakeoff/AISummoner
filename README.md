@@ -13,7 +13,7 @@ OpenCode/Codex/Claude Code，以及扩展 Windows Remote Client。
 
 [文档导航](docs/README.md) · [快速开始](docs/quick-start.md) ·
 [开发路线](docs/roadmap.md) · [安全说明](SECURITY.md) ·
-[参与开发](CONTRIBUTING.md)
+[参与开发](CONTRIBUTING.md) · [MIT License](LICENSE)
 
 ## 当前能力
 
@@ -170,6 +170,5 @@ Node build 和 Docker build 应串行执行，避免 OOM。
 
 ## License
 
-仓库目前尚未附加项目级开源许可证。公开可见不等于自动获得复制、修改或再分发
-许可；第三方组件及 DSH 体验移植的归属见
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。项目级许可证将在后续单独确定。
+AISummoner 采用 [MIT License](LICENSE)。第三方组件及 DSH 体验移植仍保留各自的
+版权与许可证，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
