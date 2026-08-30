@@ -124,10 +124,9 @@ jobs:
           Copy-Item deploy/windows-spike/README.txt $stage
           windeployqt --release --compiler-runtime --dir $stage `
             "$stage/aisummoner-client-ui.exe"
-          foreach ($runtime in @("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll")) {
-            if (-not (Test-Path (Join-Path $stage $runtime))) {
-              throw "windeployqt omitted required MSVC runtime: $runtime"
-            }
+          $redistributable = Join-Path $stage "vc_redist.x64.exe"
+          if (-not (Test-Path $redistributable)) {
+            throw "windeployqt omitted the official Visual C++ Redistributable"
           }
           $archive = "dist/AISummoner-Windows-Remote-Contract-x86_64.zip"
           Compress-Archive -Path "$stage/*" -DestinationPath $archive -Force
