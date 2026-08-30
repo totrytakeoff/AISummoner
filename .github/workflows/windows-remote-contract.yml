@@ -101,6 +101,20 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $PSNativeCommandUseErrorActionPreference = $true
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} `
+            "Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsInstall = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+          if (-not $vsInstall) { throw "Visual Studio C++ toolchain was not found" }
+          $vcvars = Join-Path $vsInstall "VC\Auxiliary\Build\vcvars64.bat"
+          $vcEnvironment = & cmd.exe /d /s /c "`"$vcvars`" >nul && set"
+          foreach ($entry in $vcEnvironment) {
+            if ($entry -match '^([^=]+)=(.*)$') {
+              Set-Item -Path "Env:$($Matches[1])" -Value $Matches[2]
+            }
+          }
+          if (-not $env:VCINSTALLDIR) { throw "vcvars64 did not set VCINSTALLDIR" }
           $stage = "dist/AISummoner-Windows-Remote-Contract"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item build/windows-remote/Release/aisummoner-client-ui.exe $stage
@@ -110,6 +124,11 @@ jobs:
           Copy-Item deploy/windows-spike/README.txt $stage
           windeployqt --release --compiler-runtime --dir $stage `
             "$stage/aisummoner-client-ui.exe"
+          foreach ($runtime in @("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll")) {
+            if (-not (Test-Path (Join-Path $stage $runtime))) {
+              throw "windeployqt omitted required MSVC runtime: $runtime"
+            }
+          }
           $archive = "dist/AISummoner-Windows-Remote-Contract-x86_64.zip"
           Compress-Archive -Path "$stage/*" -DestinationPath $archive -Force
           (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant() + `
