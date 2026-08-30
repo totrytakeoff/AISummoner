@@ -331,12 +331,18 @@ func TestConPTYUTF8ResizeInterruptAndCleanup(t *testing.T) {
 			session.Close()
 			t.Fatalf("ConPTY did not become ready: %v output=%q", err, output.Bytes())
 		}
+		if !output.Contains([]byte("AIS_SIZE=101x37")) {
+			cancel()
+			session.Close()
+			t.Fatalf("ConPTY resize was not visible to PowerShell: %q", output.Bytes())
+		}
+		promptsBeforeInterrupt := output.Count([]byte("PS "))
 		if err := session.Write(ctx, []byte{3}); err != nil {
 			cancel()
 			session.Close()
 			t.Fatal(err)
 		}
-		if err := waitForCount(ctx, output, []byte("PS "), 2); err != nil {
+		if err := waitForCount(ctx, output, []byte("PS "), promptsBeforeInterrupt+1); err != nil {
 			cancel()
 			session.Close()
 			t.Fatalf("ConPTY did not return to a prompt after Ctrl-C: %v output=%q", err, output.Bytes())
@@ -354,11 +360,6 @@ func TestConPTYUTF8ResizeInterruptAndCleanup(t *testing.T) {
 			cancel()
 			session.Close()
 			t.Fatalf("ConPTY UTF-8/interrupt proof failed: %q", output.Bytes())
-		}
-		if !output.Contains([]byte("AIS_SIZE=101x37")) {
-			cancel()
-			session.Close()
-			t.Fatalf("ConPTY resize was not visible to PowerShell: %q", output.Bytes())
 		}
 		if _, err := session.Wait(ctx); err != nil {
 			cancel()
