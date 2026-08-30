@@ -396,7 +396,13 @@ func StartConPTY(workingDirectory string, columns, rows int16) (*ConPTYSession, 
 		return nil, fmt.Errorf("attach ConPTY attribute: %w", err)
 	}
 	startup := windows.StartupInfoEx{
-		StartupInfo:             windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfoEx{}))},
+		// Explicit null standard handles prevent a console-attached parent (for
+		// example a CI runner) from donating its own console streams. The
+		// pseudoconsole then remains the child's only console I/O path.
+		StartupInfo: windows.StartupInfo{
+			Cb:    uint32(unsafe.Sizeof(windows.StartupInfoEx{})),
+			Flags: windows.STARTF_USESTDHANDLES,
+		},
 		ProcThreadAttributeList: attributes.List(),
 	}
 	job, err := newKillOnCloseJob()
