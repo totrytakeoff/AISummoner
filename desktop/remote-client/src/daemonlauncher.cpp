@@ -7,6 +7,11 @@
 #include <QProcess>
 #include <QUrl>
 
+#ifdef Q_OS_WIN
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 namespace aisummoner {
 namespace {
 
@@ -36,6 +41,15 @@ std::optional<QString> canonicalHttpsOrigin(const QString &input)
     return origin.toString(QUrl::FullyEncoded | QUrl::RemovePath | QUrl::StripTrailingSlash);
 }
 
+QString daemonFileName()
+{
+#ifdef Q_OS_WIN
+    return QStringLiteral("aisummoner-client.exe");
+#else
+    return QStringLiteral("aisummoner-client");
+#endif
+}
+
 } // namespace
 
 DaemonLauncher::DaemonLauncher(QString applicationDirectory, QString dataDirectory,
@@ -46,7 +60,23 @@ DaemonLauncher::DaemonLauncher(QString applicationDirectory, QString dataDirecto
     if (!starter_) {
         starter_ = [](const QString &program, const QStringList &arguments,
                       const QString &workingDirectory, qint64 *pid) {
+#ifdef Q_OS_WIN
+            QProcess process;
+            process.setProgram(program);
+            process.setArguments(arguments);
+            process.setWorkingDirectory(workingDirectory);
+            process.setStandardInputFile(QProcess::nullDevice());
+            process.setStandardOutputFile(QProcess::nullDevice());
+            process.setStandardErrorFile(QProcess::nullDevice());
+            process.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *native) {
+                native->flags |= CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP;
+                native->startupInfo->dwFlags |= STARTF_USESHOWWINDOW;
+                native->startupInfo->wShowWindow = SW_HIDE;
+            });
+            return process.startDetached(pid);
+#else
             return QProcess::startDetached(program, arguments, workingDirectory, pid);
+#endif
         };
     }
     guardTimer_.setParent(this);
@@ -102,14 +132,17 @@ std::optional<LaunchSpec> DaemonLauncher::buildLaunchSpec(const QString &applica
 {
     const QFileInfo appDirectoryInfo(applicationDirectory);
     const QString canonicalApplicationDirectory = appDirectoryInfo.canonicalFilePath();
-    const QFileInfo daemonInfo(QDir(applicationDirectory).filePath(QStringLiteral("aisummoner-client")));
+    const QFileInfo daemonInfo(QDir(applicationDirectory).filePath(daemonFileName()));
     const QString canonicalDaemonPath = daemonInfo.canonicalFilePath();
     const QFileInfo canonicalDaemonInfo(canonicalDaemonPath);
     if (canonicalApplicationDirectory.isEmpty() || !daemonInfo.exists() || !daemonInfo.isFile()
         || daemonInfo.isSymLink() || !daemonInfo.isExecutable() || canonicalDaemonPath.isEmpty()
         || canonicalDaemonInfo.canonicalPath() != canonicalApplicationDirectory
+#ifndef Q_OS_WIN
         || daemonInfo.permissions().testFlag(QFileDevice::WriteGroup)
-        || daemonInfo.permissions().testFlag(QFileDevice::WriteOther)) {
+        || daemonInfo.permissions().testFlag(QFileDevice::WriteOther)
+#endif
+    ) {
         if (error) *error = QStringLiteral("未找到可信的后台服务程序");
         return std::nullopt;
     }

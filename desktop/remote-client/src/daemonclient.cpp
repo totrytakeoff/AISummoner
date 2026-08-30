@@ -24,11 +24,41 @@ bool emptyResult(const QJsonObject &object)
     return object.isEmpty();
 }
 
+QString normalizeEndpoint(const QString &endpoint)
+{
+#ifdef Q_OS_WIN
+    return endpoint;
+#else
+    return QDir::cleanPath(endpoint);
+#endif
+}
+
+bool validEndpoint(const QString &endpoint)
+{
+#ifdef Q_OS_WIN
+    constexpr auto prefix = "LOCAL\\";
+    if (!endpoint.startsWith(QLatin1StringView(prefix)) || endpoint.size() < 8
+        || endpoint.size() > 200) {
+        return false;
+    }
+    for (qsizetype index = 6; index < endpoint.size(); ++index) {
+        const QChar character = endpoint.at(index);
+        if (character != QLatin1Char('.') && character != QLatin1Char('-')
+            && character != QLatin1Char('_') && !character.isLetterOrNumber()) {
+            return false;
+        }
+    }
+    return true;
+#else
+    return QDir::isAbsolutePath(endpoint) && endpoint.size() <= 100;
+#endif
+}
+
 } // namespace
 
 DaemonClient::DaemonClient(const QString &socketPath, QObject *parent,
                            int requestTimeoutMs, int pollIntervalMs)
-    : QObject(parent), socketPath_(QDir::cleanPath(socketPath)),
+    : QObject(parent), socketPath_(normalizeEndpoint(socketPath)),
       requestTimeoutMs_(qMax(100, requestTimeoutMs))
 {
     pollTimer_.setParent(this);
@@ -87,7 +117,7 @@ void DaemonClient::sendRequest(const QString &method, const QJsonObject &params,
     request.insert(QStringLiteral("params"), params);
     QByteArray frame = QJsonDocument(request).toJson(QJsonDocument::Compact);
     frame.append('\n');
-    if (frame.size() > maxFrameBytes || !QDir::isAbsolutePath(socketPath_) || socketPath_.size() > 100) {
+    if (frame.size() > maxFrameBytes || !validEndpoint(socketPath_)) {
         completion({}, QStringLiteral("INVALID_RESPONSE"));
         return;
     }

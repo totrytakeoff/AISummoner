@@ -8,6 +8,13 @@ updated_by: planner
 
 ## Current
 
+- [ ] task023 (in progress): run a bounded Windows compatibility/security
+  spike for Qt↔Go named pipes and logon-SID authentication, DPAPI identity,
+  non-elevated lifecycle, suspended Job Objects, PowerShell/ConPTY cleanup,
+  no-window daemon launch and the native Qt toolchain. Proposed ADR-0007 and
+  the detailed port design are written; the user authorized the spike on
+  2026-08-31, while production Windows enablement remains a later task.
+
 - [x] task022: freeze the common Runtime provider/model boundary, implement
   DSH-native multi-provider configuration and current-Session model selection,
   replace hard-coded DeepSeek credential preflight with selected-route
@@ -67,6 +74,8 @@ updated_by: planner
 
 ## Next
 
+- [ ] Accept or revise Proposed ADR-0007 after Task023 evidence; only then write
+  the Task024 common-platform extraction plan.
 - [x] Publish the first Controller milestone to the public GitHub repository
   with a concise README, documentation index, quick-start/deployment guides,
   public roadmap, contribution guide and security policy.
@@ -100,5 +109,7 @@ updated_by: planner
 
 ## Blocked
 
-- No architecture blocker. Go verification must run on the controlled ASD
-  environment because this local host currently has no Go toolchain.
+- Windows implementation is intentionally gated on Task023 human authorization
+  and real Windows evidence; this is a review gate, not a technical blocker.
+- Go verification must run on the controlled ASD environment because this local
+  host currently has no Go toolchain.

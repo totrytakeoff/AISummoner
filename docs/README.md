@@ -31,11 +31,13 @@
 - [ADR-0004：Alpha 双客户端与 Runtime 架构](decisions/ADR-0004-alpha-clients-and-agent-runtime.md)
 - [ADR-0005：DSH-first Controller 体验](decisions/ADR-0005-dsh-first-controller-experience.md)
 - [ADR-0006：Runtime 供应商配置与会话模型边界](decisions/ADR-0006-runtime-provider-model-configuration.md)
+- [ADR-0007（Proposed）：Windows 被控客户端平台边界](decisions/ADR-0007-windows-remote-client-platform.md)
 
 ## 设计文档
 
 - [Remote Client 私有 IPC v1](design/remote-client-ipc-v1.md)
 - [Qt Remote Client](design/remote-client-qt.md)
+- [Windows 被控客户端移植方案](design/windows-remote-client-port.md)
 
 ## 验收与运行证据
 

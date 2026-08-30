@@ -25,6 +25,7 @@ add_library(aisummoner_remote_ui STATIC
     src/eventmodel.cpp
     src/mainwindow.cpp
     src/models.cpp
+    src/platformsecurity.cpp
     src/strictjson.cpp
     src/theme.cpp
 )
@@ -43,7 +44,14 @@ target_compile_options(aisummoner_remote_ui PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
 )
 
-qt_add_executable(aisummoner-client-ui src/main.cpp)
+if(WIN32)
+    qt_add_executable(aisummoner-client-ui WIN32
+        src/main.cpp
+        resources/aisummoner-client-ui.rc
+    )
+else()
+    qt_add_executable(aisummoner-client-ui src/main.cpp)
+endif()
 target_link_libraries(aisummoner-client-ui PRIVATE aisummoner_remote_ui)
 set_target_properties(aisummoner-client-ui PROPERTIES
     OUTPUT_NAME aisummoner-client-ui
@@ -64,6 +72,15 @@ if(BUILD_TESTING)
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
         TIMEOUT 30
     )
+
+    if(WIN32)
+        qt_add_executable(aisummoner_windows_ipc_probe
+            tests/windows_ipc_probe.cpp
+        )
+        target_link_libraries(aisummoner_windows_ipc_probe PRIVATE
+            aisummoner_remote_ui
+        )
+    endif()
 endif()
 
 install(TARGETS aisummoner-client-ui RUNTIME DESTINATION bin)

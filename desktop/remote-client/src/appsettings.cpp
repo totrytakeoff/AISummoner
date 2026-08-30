@@ -1,6 +1,7 @@
 #include "appsettings.h"
 
 #include <QDir>
+#include <QStandardPaths>
 
 namespace aisummoner {
 
@@ -41,15 +42,24 @@ QString AppSettings::fileName() const
 
 QString AppSettings::defaultDataDirectory()
 {
+#ifdef Q_OS_WIN
+    const QString localData = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+    return QDir::cleanPath(QDir(localData).filePath(QStringLiteral("AISummoner/RemoteClient")));
+#else
     // Keep the GUI and the Go CLI on the same fixed default even when a custom
     // XDG_DATA_HOME is present.  Local control commands must find the daemon's
     // socket without a hidden GUI-only path rule.
     return QDir(QDir::homePath()).filePath(QStringLiteral(".local/share/aisummoner"));
+#endif
 }
 
 QString AppSettings::defaultSocketPath()
 {
+#ifdef Q_OS_WIN
+    return QStringLiteral("LOCAL\\AISummoner.Remote.v1");
+#else
     return QDir(defaultDataDirectory()).filePath(QStringLiteral("client.sock"));
+#endif
 }
 
 QString AppSettings::defaultServerOrigin()

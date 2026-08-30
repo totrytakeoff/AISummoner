@@ -79,8 +79,11 @@ AISummoner is a browser-controlled, server-side Agent and SSH remote execution p
   event v2, richer native actions and the other Runtime adapters remain work.
 - Task015/016 implemented the Qt 6 Widgets Remote Desktop Client and a
   zero-configuration GUI+daemon AppImage. Linux is the only supported Remote
-  platform today; Windows requires a dedicated IPC/PTY/service design rather
-  than a blind cross-compile.
+  platform today. Proposed ADR-0007 and the Windows port design now define a
+  common-Core/platform-backend approach: per-user background lifecycle,
+  authenticated named-pipe IPC, DPAPI identity, PowerShell/ConPTY/Job Objects,
+  native Qt packaging and a target-aware Agent execution profile. Task023 must
+  prove those OS contracts before production Windows implementation begins.
 
 ## Constraints
 

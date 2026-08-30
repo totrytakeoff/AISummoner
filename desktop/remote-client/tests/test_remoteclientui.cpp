@@ -21,6 +21,7 @@
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QStackedWidget>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -47,6 +48,25 @@ QByteArray responseFrame(const QString &id, const QJsonObject &result)
                                      {QStringLiteral("result"), result}})
                .toJson(QJsonDocument::Compact)
         + '\n';
+}
+
+QString testEndpoint(const QTemporaryDir &temporary, const QString &suffix)
+{
+#ifdef Q_OS_WIN
+    return QStringLiteral("LOCAL\\AISummoner.Remote.QtTest.%1.%2")
+        .arg(QCoreApplication::applicationPid()).arg(suffix);
+#else
+    return temporary.filePath(suffix + QStringLiteral(".sock"));
+#endif
+}
+
+QString daemonBinaryName()
+{
+#ifdef Q_OS_WIN
+    return QStringLiteral("aisummoner-client.exe");
+#else
+    return QStringLiteral("aisummoner-client");
+#endif
 }
 
 class FakeDaemon final : public QObject {
@@ -258,7 +278,7 @@ void RemoteClientUiTest::daemonClientPollsAndRunsActionsWithoutOverlap()
 {
     QTemporaryDir temporary;
     QVERIFY(temporary.isValid());
-    const QString socketPath = temporary.filePath(QStringLiteral("daemon.sock"));
+    const QString socketPath = testEndpoint(temporary, QStringLiteral("poll"));
     FakeDaemon daemon(socketPath);
     daemon.delayMs_ = 180;
     QVERIFY(daemon.start());
@@ -295,7 +315,7 @@ void RemoteClientUiTest::daemonClientResetsEventStreamAfterDaemonReconnect()
 {
     QTemporaryDir temporary;
     QVERIFY(temporary.isValid());
-    const QString socketPath = temporary.filePath(QStringLiteral("daemon.sock"));
+    const QString socketPath = testEndpoint(temporary, QStringLiteral("reconnect"));
     FakeDaemon daemon(socketPath);
     QVERIFY(daemon.start());
     DaemonClient client(socketPath, nullptr, 300, 100);
@@ -320,7 +340,7 @@ void RemoteClientUiTest::daemonClientRejectsInvalidAndTimesOut()
 {
     QTemporaryDir temporary;
     QVERIFY(temporary.isValid());
-    const QString socketPath = temporary.filePath(QStringLiteral("daemon.sock"));
+    const QString socketPath = testEndpoint(temporary, QStringLiteral("invalid"));
     FakeDaemon daemon(socketPath);
     daemon.invalidDuplicate_ = true;
     QVERIFY(daemon.start());
@@ -356,7 +376,7 @@ void RemoteClientUiTest::launcherUsesOnlySafeSiblingAndExactArguments()
 {
     QTemporaryDir temporary;
     QVERIFY(temporary.isValid());
-    const QString daemon = temporary.filePath(QStringLiteral("aisummoner-client"));
+    const QString daemon = temporary.filePath(daemonBinaryName());
     QFile executable(daemon);
     QVERIFY(executable.open(QIODevice::WriteOnly));
     executable.write("test");
@@ -383,6 +403,7 @@ void RemoteClientUiTest::launcherUsesOnlySafeSiblingAndExactArguments()
 
     QTemporaryDir outside;
     QVERIFY(outside.isValid());
+#ifndef Q_OS_WIN
     const QString outsideBinary = outside.filePath(QStringLiteral("daemon"));
     QFile other(outsideBinary);
     QVERIFY(other.open(QIODevice::WriteOnly));
@@ -396,6 +417,7 @@ void RemoteClientUiTest::launcherUsesOnlySafeSiblingAndExactArguments()
     QVERIFY(executable.open(QIODevice::WriteOnly));
     executable.close();
     executable.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+#endif
 
     int starts = 0;
     DaemonLauncher launcher(temporary.path(), data, nullptr,
@@ -411,8 +433,15 @@ void RemoteClientUiTest::launcherUsesOnlySafeSiblingAndExactArguments()
 
 void RemoteClientUiTest::settingsPersistOnlyAllowlistedValues()
 {
+#ifdef Q_OS_WIN
+    QCOMPARE(AppSettings::defaultDataDirectory(),
+             QDir::cleanPath(QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation))
+                                 .filePath(QStringLiteral("AISummoner/RemoteClient"))));
+    QCOMPARE(AppSettings::defaultSocketPath(), QStringLiteral("LOCAL\\AISummoner.Remote.v1"));
+#else
     QCOMPARE(AppSettings::defaultDataDirectory(),
              QDir(QDir::homePath()).filePath(QStringLiteral(".local/share/aisummoner")));
+#endif
     QTemporaryDir temporary;
     QVERIFY(temporary.isValid());
     const QString file = temporary.filePath(QStringLiteral("settings.ini"));
@@ -500,13 +529,13 @@ void RemoteClientUiTest::mainWindowHasThreePagesAndCloseDoesNotPause()
 {
     QTemporaryDir temporary;
     QVERIFY(temporary.isValid());
-    const QString daemonPath = temporary.filePath(QStringLiteral("aisummoner-client"));
+    const QString daemonPath = temporary.filePath(daemonBinaryName());
     QFile executable(daemonPath);
     QVERIFY(executable.open(QIODevice::WriteOnly));
     executable.close();
     executable.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
     AppSettings settings(temporary.filePath(QStringLiteral("settings.ini")));
-    DaemonClient client(temporary.filePath(QStringLiteral("missing.sock")), nullptr, 100, 1000);
+    DaemonClient client(testEndpoint(temporary, QStringLiteral("missing")), nullptr, 100, 1000);
     int daemonStarts = 0;
     QStringList daemonArguments;
     DaemonLauncher launcher(temporary.path(), temporary.filePath(QStringLiteral("data")), nullptr,

@@ -1,0 +1,122 @@
+name: Windows Remote contract
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/windows-remote-client
+    paths:
+      - ".github/workflows/windows-remote-contract.yml"
+      - "cmd/windows-contract-probe/**"
+      - "desktop/remote-client/**"
+      - "deploy/windows-spike/**"
+      - "internal/windowsprobe/**"
+      - "go.mod"
+      - "go.sum"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-remote-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-contract:
+    name: Windows 2022 / amd64
+    runs-on: windows-2022
+    timeout-minutes: 35
+    env:
+      GOMAXPROCS: "2"
+      GOFLAGS: "-p=1"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build and run Windows Go contracts
+        shell: pwsh
+        run: |
+          go test -buildvcs=false -count=1 -timeout=3m -v ./internal/windowsprobe
+          New-Item -ItemType Directory -Force -Path dist/windows-contract | Out-Null
+          go build -buildvcs=false -trimpath -o dist/windows-contract/windows-contract-probe.exe ./cmd/windows-contract-probe
+          & dist/windows-contract/windows-contract-probe.exe --mode facts |
+            Out-File -Encoding utf8 dist/windows-contract/runner-facts.json
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4
+        with:
+          version: "6.8.3"
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Configure and build Qt Remote UI
+        shell: pwsh
+        run: |
+          cmake -S desktop/remote-client -B build/windows-remote -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake --build build/windows-remote --parallel 2
+          ctest --test-dir build/windows-remote --output-on-failure -j 1
+
+      - name: Prove Qt to Go named-pipe interoperability
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $pipeName = "LOCAL\AISummoner.Remote.Action.$env:GITHUB_RUN_ID.$env:GITHUB_RUN_ATTEMPT"
+          $readyFile = Join-Path $env:RUNNER_TEMP "aisummoner-pipe-ready.txt"
+          Remove-Item -Force -ErrorAction SilentlyContinue $readyFile
+          $server = Start-Process `
+            -FilePath "dist/windows-contract/windows-contract-probe.exe" `
+            -ArgumentList @("--mode", "pipe-server", "--pipe", $pipeName, "--ready-file", $readyFile) `
+            -PassThru -WindowStyle Hidden
+          try {
+            $deadline = (Get-Date).AddSeconds(15)
+            while (-not (Test-Path $readyFile)) {
+              if ($server.HasExited) { throw "Go named-pipe probe exited before readiness" }
+              if ((Get-Date) -ge $deadline) { throw "Go named-pipe probe readiness timed out" }
+              Start-Sleep -Milliseconds 100
+            }
+            & build/windows-remote/aisummoner_windows_ipc_probe.exe $pipeName
+            if ($LASTEXITCODE -ne 0) { throw "Qt named-pipe probe failed with $LASTEXITCODE" }
+          } finally {
+            if (-not $server.HasExited) { Stop-Process -Id $server.Id -Force }
+            $server.WaitForExit()
+          }
+
+      - name: Assemble unsigned contract bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = "dist/AISummoner-Windows-Remote-Contract"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item build/windows-remote/aisummoner-client-ui.exe $stage
+          Copy-Item build/windows-remote/aisummoner_windows_ipc_probe.exe $stage
+          Copy-Item dist/windows-contract/windows-contract-probe.exe $stage
+          Copy-Item dist/windows-contract/runner-facts.json $stage
+          Copy-Item deploy/windows-spike/README.txt $stage
+          windeployqt --release --compiler-runtime --dir $stage `
+            "$stage/aisummoner-client-ui.exe"
+          $archive = "dist/AISummoner-Windows-Remote-Contract-x86_64.zip"
+          Compress-Archive -Path "$stage/*" -DestinationPath $archive -Force
+          (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant() + `
+            "  " + (Split-Path -Leaf $archive) |
+            Out-File -Encoding ascii "$archive.sha256"
+
+      - name: Upload unsigned contract artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: AISummoner-Windows-Remote-Contract-x86_64
+          path: |
+            dist/AISummoner-Windows-Remote-Contract-x86_64.zip
+            dist/AISummoner-Windows-Remote-Contract-x86_64.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+

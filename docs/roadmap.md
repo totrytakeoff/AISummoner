@@ -39,8 +39,11 @@ Capability 权威；不能引入 Browser 直连 Provider 或 Server 本地 shell
 ## 跨平台 Remote Client
 
 - **Linux**：继续稳定 Qt AppImage、安装/更新、权限提示和真实 Ubuntu 验收。
-- **Windows**：复用 Go Remote Core 状态机和 Qt UI；新增 Windows Service/用户态后台、
-  Named Pipe 本地 IPC、ConPTY/进程树回收、证书存储和签名安装包设计。
+- **Windows**：复用 Go Remote Core 状态机和 Qt UI；首版采用普通用户会话内的后台 Core，
+  新增带 logon-SID 验证的 Named Pipe、DPAPI Device Identity、PowerShell/ConPTY、Job Object
+  进程树回收和原生 Qt 打包。先完成兼容性/安全 spike，再实现并签名发布；不把 Core 直接
+  注册为 LocalSystem Service。详细方案见
+  [Windows 被控客户端移植方案](design/windows-remote-client-port.md)。
 - **macOS**：在 Windows 边界稳定后再评估，不提前承诺。
 
 Windows 不是简单交叉编译：Unix socket、`SO_PEERCRED`、PTY、信号、文件权限与 daemon

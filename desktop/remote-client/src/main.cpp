@@ -2,6 +2,7 @@
 #include "daemonclient.h"
 #include "daemonlauncher.h"
 #include "mainwindow.h"
+#include "platformsecurity.h"
 #include "theme.h"
 
 #include <QApplication>
@@ -9,8 +10,6 @@
 #include <QGuiApplication>
 #include <QMessageBox>
 #include <QStyleHints>
-
-#include <unistd.h>
 
 int main(int argc, char **argv)
 {
@@ -20,9 +19,10 @@ int main(int argc, char **argv)
     QCoreApplication::setApplicationVersion(QStringLiteral(AISUMMONER_GUI_VERSION));
     QGuiApplication::setDesktopFileName(QStringLiteral("aisummoner-remote"));
 
-    if (geteuid() == 0) {
+    const QString privilegeError = aisummoner::privilegeViolation();
+    if (!privilegeError.isEmpty()) {
         QMessageBox::critical(nullptr, QStringLiteral("AISummoner Remote"),
-                              QStringLiteral("出于安全考虑，被控客户端不能以 root 身份运行。"));
+                              privilegeError);
         return 1;
     }
 

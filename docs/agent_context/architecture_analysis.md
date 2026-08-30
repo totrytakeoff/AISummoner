@@ -22,8 +22,12 @@ The strongest reusable assets are the trust chain, owner-scoped persistence,
 Tunnel/SSH lifecycle, Terminal data plane, Qt Remote GUI and the source-aligned
 DSH presentation baseline. DSH now also exposes native redacted Provider
 configuration and current-Session model selection through optional common
-capabilities. The primary debt is the remaining one-Turn lifecycle and
-incomplete Runtime capabilities rather than Controller chrome.
+capabilities. Linux remains the only implemented Remote OS. Windows has now
+been audited as a platform boundary rather than a cross-compile: the reusable
+Core needs named-pipe/DPAPI/ConPTY/Job Object backends and Agent target-shell
+awareness. The primary product debt is the remaining one-Turn lifecycle,
+incomplete Runtime capabilities and the unproved Windows platform seam rather
+than Controller chrome.
 
 ## Alpha Target Shape
 
@@ -123,6 +127,12 @@ The GUI needs typed status/pairing/pause/event/policy calls over a mode-0600
 Unix socket with peer UID validation. Device private key operations remain in
 the daemon. GUI exit and daemon disconnect are distinct state transitions.
 
+The Windows equivalent keeps the same JSON dispatch over a login-session named
+pipe with an explicit logon-SID DACL and peer-token check. Windows identity is
+DPAPI CurrentUser protected; process sessions use PowerShell/ConPTY and a
+kill-on-close Job Object. These are platform backends below the common Core,
+not a separate Windows product fork.
+
 ## Migration Strategy
 
 1. Split Remote CLI internals into a daemon controller and private IPC, then
@@ -134,7 +144,9 @@ the daemon. GUI exit and daemon disconnect are distinct state transitions.
    lifecycle capabilities and richer native actions remain incremental work;
    native Provider/model configuration is complete.
 4. Enrich OpenCode, then add Codex and Claude using the same contracts.
-5. Add structured file/diff and Desktop capabilities only through separate ADRs.
+5. Prove the Windows backend contracts, then port Core/IPC/exec/ConPTY/Qt and
+   add a trusted Agent Execution Profile without weakening Linux behavior.
+6. Add structured file/diff and Desktop capabilities only through separate ADRs.
 
 Old routes should redirect for at least one migration release. Existing Session
 rows must remain readable; schema changes are forward-only and must have a
@@ -158,6 +170,10 @@ bounded compatibility period.
 - **Desktop packaging**: Qt platform plugins and system ABI dependencies differ
   across Ubuntu versions. Keep daemon/IPC toolkit-neutral, use Qt Widgets rather
   than WebEngine, and require AppImage tests on the oldest supported Ubuntu.
+- **False Windows portability**: Tunnel connectivity can pass while cwd,
+  PowerShell semantics, ConPTY or descendant cleanup remains broken. Gate the
+  platform behind real named-pipe, Job Object, Terminal and DSH Turn evidence;
+  never accept a compile-only result.
 - **Credential proliferation**: multiple runtimes introduce API keys/OAuth.
   Keep secrets server-side and never return them. DSH currently uses a private
   mode-0600 credential store; future multi-Runtime profiles still need a common

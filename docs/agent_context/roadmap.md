@@ -78,8 +78,15 @@ updated_by: planner
 
 ## Alpha A8 And Later
 
-- [ ] Windows Remote Client: named-pipe IPC, service/background lifecycle,
-  ConPTY/process-tree cleanup and signed packaging behind a platform ADR.
+- [ ] A8.0 task023: prove Windows named-pipe/logon-SID, DPAPI, suspended Job,
+  PowerShell, ConPTY, Qt detached launch and native packaging contracts; accept
+  or revise Proposed ADR-0007.
+- [ ] A8.1 task024-task025: extract common platform seams, keep Linux green,
+  then implement Windows per-user Core, identity and private IPC.
+- [ ] A8.2 task026-task027: implement PowerShell exec/Job cleanup and ConPTY
+  Terminal through the real WSS/yamux/strict-SSH chain.
+- [ ] A8.3 task028-task029: ship a clean-VM Qt engineering ZIP, add the trusted
+  Agent Execution Profile/DSH PowerShell path, then sign/package after E2E.
 - [ ] Structured Remote file read/search/write/patch/diff.
 - [ ] Remote local restrictive permissions.
 - [ ] Desktop viewing/input only after a dedicated threat model and ADR.
