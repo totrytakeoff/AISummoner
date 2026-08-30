@@ -386,9 +386,10 @@ func StartConPTY(workingDirectory string, columns, rows int16) (*ConPTYSession, 
 		return nil, fmt.Errorf("allocate ConPTY attributes: %w", err)
 	}
 	defer attributes.Delete()
+	pseudoValue := *(*unsafe.Pointer)(unsafe.Pointer(&pseudo))
 	if err := attributes.Update(
 		windows.PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-		unsafe.Pointer(&pseudo), unsafe.Sizeof(pseudo),
+		pseudoValue, unsafe.Sizeof(pseudo),
 	); err != nil {
 		windows.ClosePseudoConsole(pseudo)
 		cleanupPipes()

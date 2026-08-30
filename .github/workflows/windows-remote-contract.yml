@@ -43,6 +43,8 @@ jobs:
       - name: Build and run Windows Go contracts
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
           go test -buildvcs=false -count=1 -timeout=3m -v ./internal/windowsprobe
           New-Item -ItemType Directory -Force -Path dist/windows-contract | Out-Null
           go build -buildvcs=false -trimpath -o dist/windows-contract/windows-contract-probe.exe ./cmd/windows-contract-probe
@@ -61,6 +63,8 @@ jobs:
       - name: Configure and build Qt Remote UI
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
           cmake -S desktop/remote-client -B build/windows-remote `
             -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON
           cmake --build build/windows-remote --config Release --parallel 2
@@ -70,6 +74,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
           $pipeName = "LOCAL\AISummoner.Remote.Action.$env:GITHUB_RUN_ID.$env:GITHUB_RUN_ATTEMPT"
           $readyFile = Join-Path $env:RUNNER_TEMP "aisummoner-pipe-ready.txt"
           Remove-Item -Force -ErrorAction SilentlyContinue $readyFile
@@ -95,6 +100,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
           $stage = "dist/AISummoner-Windows-Remote-Contract"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item build/windows-remote/Release/aisummoner-client-ui.exe $stage

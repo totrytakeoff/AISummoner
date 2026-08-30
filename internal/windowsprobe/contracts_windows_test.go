@@ -233,9 +233,13 @@ exit 17
 	if result.ExitCode != 17 {
 		t.Fatalf("exit code=%d, want 17", result.ExitCode)
 	}
-	if !bytes.Contains(result.Stdout, []byte("AIS_STDOUT_中文")) ||
-		!bytes.Contains(result.Stdout, []byte(workingDirectory)) {
+	if !bytes.Contains(result.Stdout, []byte("AIS_STDOUT_中文")) {
 		t.Fatalf("unexpected stdout %q", result.Stdout)
+	}
+	normalizedOutput := strings.ToLower(strings.ReplaceAll(string(result.Stdout), "/", `\`))
+	normalizedWorkingDirectory := strings.ToLower(strings.ReplaceAll(workingDirectory, "/", `\`))
+	if !strings.Contains(normalizedOutput, normalizedWorkingDirectory) {
+		t.Fatalf("stdout did not report cwd %q: %q", workingDirectory, result.Stdout)
 	}
 	if !bytes.Contains(result.Stderr, []byte("AIS_STDERR_中文")) {
 		t.Fatalf("unexpected stderr %q", result.Stderr)
