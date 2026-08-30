@@ -78,9 +78,11 @@ updated_by: planner
 
 ## Alpha A8 And Later
 
-- [ ] A8.0 task023: prove Windows named-pipe/logon-SID, DPAPI, suspended Job,
-  PowerShell, ConPTY, Qt detached launch and native packaging contracts; accept
-  or revise Proposed ADR-0007.
+- [ ] A8.0 task023: Windows Server 2022 CI proves named-pipe/logon-SID carrier,
+  DPAPI/ACL, suspended Job, PowerShell, strict ConPTY resize/interrupt/cleanup,
+  Qt/MSVC and native packaging contracts. Ordinary-user Windows 11/10,
+  wrong-logon, clean-VM and detached production-Core evidence remain; ADR-0007
+  stays Proposed.
 - [ ] A8.1 task024-task025: extract common platform seams, keep Linux green,
   then implement Windows per-user Core, identity and private IPC.
 - [ ] A8.2 task026-task027: implement PowerShell exec/Job cleanup and ConPTY

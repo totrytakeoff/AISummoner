@@ -82,8 +82,11 @@ AISummoner is a browser-controlled, server-side Agent and SSH remote execution p
   platform today. Proposed ADR-0007 and the Windows port design now define a
   common-Core/platform-backend approach: per-user background lifecycle,
   authenticated named-pipe IPC, DPAPI identity, PowerShell/ConPTY/Job Objects,
-  native Qt packaging and a target-aware Agent execution profile. Task023 must
-  prove those OS contracts before production Windows implementation begins.
+  native Qt packaging and a target-aware Agent execution profile. Task023's
+  Windows Server 2022 CI has proven the reusable API/toolchain contracts and
+  an unsigned Qt engineering bundle; ordinary-user Windows 11/10, wrong-logon,
+  clean-VM and production Core E2E evidence remain, so Windows is not yet a
+  supported Remote platform and ADR-0007 remains Proposed.
 
 ## Constraints
 

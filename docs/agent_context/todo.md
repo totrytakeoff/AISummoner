@@ -8,12 +8,13 @@ updated_by: planner
 
 ## Current
 
-- [ ] task023 (in progress): run a bounded Windows compatibility/security
-  spike for Qt↔Go named pipes and logon-SID authentication, DPAPI identity,
-  non-elevated lifecycle, suspended Job Objects, PowerShell/ConPTY cleanup,
-  no-window daemon launch and the native Qt toolchain. Proposed ADR-0007 and
-  the detailed port design are written; the user authorized the spike on
-  2026-08-31, while production Windows enablement remains a later task.
+- [ ] task023 (in progress): Windows Server 2022 CI now proves the strict
+  Qt↔Go named-pipe path, exact peer-token check, DPAPI/ACL, suspended Job,
+  PowerShell/ConPTY runtime, Qt/MSVC build and unsigned contract bundle. The
+  accepted CI evidence is run `33330465430` and includes the official Visual
+  C++ Redistributable. Ordinary-user Windows 11/10, different-logon rejection,
+  clean-VM/no-console-flash and production Core E2E remain before ADR-0007 can
+  be accepted.
 
 - [x] task022: freeze the common Runtime provider/model boundary, implement
   DSH-native multi-provider configuration and current-Session model selection,
@@ -109,7 +110,10 @@ updated_by: planner
 
 ## Blocked
 
-- Windows implementation is intentionally gated on Task023 human authorization
-  and real Windows evidence; this is a review gate, not a technical blocker.
-- Go verification must run on the controlled ASD environment because this local
-  host currently has no Go toolchain.
+- No active implementation blocker. Task023's remaining evidence needs a
+  non-elevated Windows 11/10 desktop VM and, for the wrong-logon checks, a
+  second local account. The user explicitly allowed those checks to follow the
+  current GitHub Actions implementation pass.
+- This host still has no native Go toolchain; bounded local Go builds use the
+  pinned serial Docker environment. No Task023 verification requires or
+  modifies ASD.

@@ -98,3 +98,24 @@ portable ZIP；干净 VM 和真实链路通过后，再选择 per-user installer
 DPAPI/ACL、suspended Job、PowerShell exec、ConPTY resize/joined cleanup 和无窗口 daemon 启动
 后，才可改为 Accepted。Spike 若推翻具体 carrier/endpoint/launcher，只修订实现选择，不默认
 放宽上述安全合同。
+
+## Task023 当前证据（2026-08-31）
+
+GitHub Actions `windows-2022` 已在同一原生作业中证明：Go 1.23 Windows
+合同测试、Qt 6.8.3/MSVC Release 构建与 CTest、Qt `QLocalSocket` 到
+`go-winio` 的真实 named-pipe 请求、DPAPI/ACL、suspended Job 子孙回收、
+PowerShell UTF-8/stdout/stderr/exit/cwd，以及 ConPTY `101x37` resize、Ctrl-C 和重复
+handle 清理。最终证据为
+[run 33330465430](https://github.com/totrytakeoff/AISummoner/actions/runs/33330465430)，
+详细失败/重试和产物 hash 见 `docs/agent_context/tasks/task023/summary.md`。
+
+实测同时冻结了两个具体选择：Qt 名称
+`LOCAL\AISummoner.Remote.v1` 对应 Go 路径
+`\\.\pipe\LOCAL\AISummoner.Remote.v1`；peer 在读取协议前使用 exact pipe client
+PID 的 process token/`TokenLogonSid` 并复核 PID，不使用依赖先读字节的
+`ImpersonateNamedPipeClient`。ConPTY 子进程还必须显式置空父进程标准句柄，
+防止已附着 console 的 host 绕过 pseudoconsole。
+
+状态仍为 `Proposed`：目前的实机是 elevated Windows Server 2022 hosted runner，
+尚缺普通桌面用户下的 Windows 11/Windows 10 22H2、第二 logon 拒绝、干净 VM、
+GUI 启动生产 Core 的无 console flash/保活以及真实 Tunnel/Terminal 证据。
