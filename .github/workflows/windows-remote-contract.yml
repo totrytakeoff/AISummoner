@@ -61,10 +61,10 @@ jobs:
       - name: Configure and build Qt Remote UI
         shell: pwsh
         run: |
-          cmake -S desktop/remote-client -B build/windows-remote -G Ninja `
-            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
-          cmake --build build/windows-remote --parallel 2
-          ctest --test-dir build/windows-remote --output-on-failure -j 1
+          cmake -S desktop/remote-client -B build/windows-remote `
+            -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON
+          cmake --build build/windows-remote --config Release --parallel 2
+          ctest --test-dir build/windows-remote -C Release --output-on-failure -j 1
 
       - name: Prove Qt to Go named-pipe interoperability
         shell: pwsh
@@ -84,7 +84,7 @@ jobs:
               if ((Get-Date) -ge $deadline) { throw "Go named-pipe probe readiness timed out" }
               Start-Sleep -Milliseconds 100
             }
-            & build/windows-remote/aisummoner_windows_ipc_probe.exe $pipeName
+            & build/windows-remote/Release/aisummoner_windows_ipc_probe.exe $pipeName
             if ($LASTEXITCODE -ne 0) { throw "Qt named-pipe probe failed with $LASTEXITCODE" }
           } finally {
             if (-not $server.HasExited) { Stop-Process -Id $server.Id -Force }
@@ -97,8 +97,8 @@ jobs:
           $ErrorActionPreference = "Stop"
           $stage = "dist/AISummoner-Windows-Remote-Contract"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          Copy-Item build/windows-remote/aisummoner-client-ui.exe $stage
-          Copy-Item build/windows-remote/aisummoner_windows_ipc_probe.exe $stage
+          Copy-Item build/windows-remote/Release/aisummoner-client-ui.exe $stage
+          Copy-Item build/windows-remote/Release/aisummoner_windows_ipc_probe.exe $stage
           Copy-Item dist/windows-contract/windows-contract-probe.exe $stage
           Copy-Item dist/windows-contract/runner-facts.json $stage
           Copy-Item deploy/windows-spike/README.txt $stage
@@ -119,4 +119,3 @@ jobs:
             dist/AISummoner-Windows-Remote-Contract-x86_64.zip.sha256
           if-no-files-found: error
           retention-days: 14
-
