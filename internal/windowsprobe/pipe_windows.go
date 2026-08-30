@@ -6,10 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"runtime"
 	"strings"
 	"sync/atomic"
-	"syscall"
 
 	"github.com/Microsoft/go-winio"
 	"golang.org/x/sys/windows"
@@ -18,11 +16,6 @@ import (
 const (
 	DefaultQtPipeName = `LOCAL\AISummoner.Remote.v1`
 	pipePrefix        = `\\.\pipe\`
-)
-
-var (
-	advapi32                       = windows.NewLazySystemDLL("advapi32.dll")
-	procImpersonateNamedPipeClient = advapi32.NewProc("ImpersonateNamedPipeClient")
 )
 
 // FullPipePath converts the Qt QLocalSocket server name to the native path used
@@ -91,24 +84,33 @@ func namedPipePeerLogonSID(connection net.Conn) (string, error) {
 	if !ok || handleSource.Fd() == 0 {
 		return "", errors.New("named pipe carrier does not expose its native handle")
 	}
-
-	// Pipe impersonation attaches to the calling OS thread. Lock the goroutine
-	// until RevertToSelf has restored the daemon token.
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-	result, _, callErr := procImpersonateNamedPipeClient.Call(handleSource.Fd())
-	if result == 0 {
-		if callErr == nil || callErr == syscall.Errno(0) {
-			callErr = windows.ERROR_ACCESS_DENIED
-		}
-		return "", fmt.Errorf("impersonate named-pipe peer: %w", callErr)
+	pipe := windows.Handle(handleSource.Fd())
+	var processID uint32
+	if err := windows.GetNamedPipeClientProcessId(pipe, &processID); err != nil {
+		return "", fmt.Errorf("read named-pipe peer process: %w", err)
 	}
-	defer windows.RevertToSelf()
-
+	if processID == 0 {
+		return "", errors.New("named-pipe peer process is invalid")
+	}
+	process, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, processID)
+	if err != nil {
+		return "", fmt.Errorf("open named-pipe peer process: %w", err)
+	}
+	defer windows.CloseHandle(process)
 	var token windows.Token
-	if err := windows.OpenThreadToken(windows.CurrentThread(), windows.TOKEN_QUERY, true, &token); err != nil {
-		return "", fmt.Errorf("open named-pipe peer token: %w", err)
+	if err := windows.OpenProcessToken(process, windows.TOKEN_QUERY, &token); err != nil {
+		return "", fmt.Errorf("open named-pipe peer process token: %w", err)
 	}
 	defer token.Close()
-	return tokenLogonSID(token)
+	logonSID, err := tokenLogonSID(token)
+	if err != nil {
+		return "", err
+	}
+	// Re-query the exact connected instance after opening the process token.
+	// A disconnect or changed peer fails closed before any protocol byte is read.
+	var confirmedProcessID uint32
+	if err := windows.GetNamedPipeClientProcessId(pipe, &confirmedProcessID); err != nil || confirmedProcessID != processID {
+		return "", errors.New("named-pipe peer changed during token verification")
+	}
+	return logonSID, nil
 }

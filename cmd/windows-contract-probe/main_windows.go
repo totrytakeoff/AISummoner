@@ -148,6 +148,7 @@ func handleConnection(connection net.Conn) {
 	default:
 		result = map[string]any{}
 	}
+	fmt.Printf("REQUEST %s\n", incoming.Method)
 	encoded, err := json.Marshal(response{Version: 1, ID: incoming.ID, OK: true, Result: result})
 	if err != nil || len(encoded)+1 > maximumFrameBytes {
 		return

@@ -17,6 +17,10 @@ int main(int argc, char **argv)
     bool statusReceived = false;
     bool eventReceived = false;
     DaemonClient client(application.arguments().at(1), nullptr, 3000, 200);
+    QObject::connect(&client, &DaemonClient::requestSent, &application,
+                     [](const QString &method) { QTextStream(stdout) << "REQUEST " << method << '\n'; });
+    QObject::connect(&client, &DaemonClient::availabilityChanged, &application,
+                     [](bool available) { QTextStream(stdout) << "AVAILABLE " << available << '\n'; });
     QObject::connect(&client, &DaemonClient::statusChanged, &application,
                      [&](const RemoteStatus &status) {
         if (status.deviceId != QStringLiteral("dev_windows_contract")
@@ -39,10 +43,10 @@ int main(int argc, char **argv)
         if (statusReceived) application.exit(0);
     });
     QTimer::singleShot(15000, &application, [&]() {
-        QTextStream(stderr) << "Qt-to-Go named-pipe probe timed out\n";
+        QTextStream(stderr) << "Qt-to-Go named-pipe probe timed out; status="
+                            << statusReceived << " events=" << eventReceived << '\n';
         application.exit(4);
     });
     client.start();
     return application.exec();
 }
-

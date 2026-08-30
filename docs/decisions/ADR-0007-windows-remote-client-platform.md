@@ -35,8 +35,10 @@ process/PTY 使用小接口与 build tags/Qt platform guards 分离。Linux 现�
 
 IPC v1 schema、方法和上限不变。Windows transport 使用 named pipe，必须具有 protected
 logon-SID DACL、remote-client rejection、exclusive first instance，并在 accept 后比较 peer
-token 的 logon SID。默认 pipe ACL 或仅靠不可猜名称不可接受。Qt 继续通过 `QLocalSocket`
-异步通信。
+token 的 logon SID。peer token 由 exact pipe handle 的 client PID 定位，打开进程 token 后
+再次复核该 pipe client PID，且在读取协议字节前完成；不使用依赖“已读取上一条消息”的
+`ImpersonateNamedPipeClient`。默认 pipe ACL 或仅靠不可猜名称不可接受。Qt 继续通过
+`QLocalSocket` 异步通信。
 
 ### 4. Windows Device key 使用 DPAPI CurrentUser
 
@@ -96,4 +98,3 @@ portable ZIP；干净 VM 和真实链路通过后，再选择 per-user installer
 DPAPI/ACL、suspended Job、PowerShell exec、ConPTY resize/joined cleanup 和无窗口 daemon 启动
 后，才可改为 Accepted。Spike 若推翻具体 carrier/endpoint/launcher，只修订实现选择，不默认
 放宽上述安全合同。
-

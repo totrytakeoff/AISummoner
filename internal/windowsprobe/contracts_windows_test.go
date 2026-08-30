@@ -183,10 +183,7 @@ func TestVerifiedPipeExclusiveConcurrentAndRestart(t *testing.T) {
 		go func(index int) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			connection, dialErr := winio.DialPipeAccessImpLevel(
-				ctx, path, uint32(windows.GENERIC_READ|windows.GENERIC_WRITE),
-				winio.PipeImpLevelImpersonation,
-			)
+			connection, dialErr := winio.DialPipeContext(ctx, path)
 			if dialErr != nil {
 				clientErrors <- dialErr
 				return

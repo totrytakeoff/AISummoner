@@ -155,7 +155,9 @@ Windows 默认 named-pipe ACL 会包含过宽主体，生产实现必须显式�
 - protected DACL 仅授予当前 logon SID 必需的 duplex 权限，不继承
   Everyone/Anonymous/Users/Administrators 权限；
 - 设置拒绝远程 pipe client 的标志；
-- 每次 accept 后从 pipe handle 获取或 impersonate peer token，比较 `TokenLogonSid`；
+- 每次 accept 后从 exact pipe handle 读取 client PID，打开该进程 token 并比较
+  `TokenLogonSid`，随后复核 pipe 的 client PID 未变化；不能在首字节到达前依赖
+  `ImpersonateNamedPipeClient`，否则 Qt 异步连接会产生竞态；
 - peer 验证失败时在读取 JSON 前关闭连接，只记录固定错误；
 - listener 创建必须具有 first-instance/exclusive 语义，第二个 daemon 不接管已有 endpoint；
 - 不以“pipe 名字很难猜”作为认证。
