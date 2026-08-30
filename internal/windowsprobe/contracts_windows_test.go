@@ -224,7 +224,7 @@ func TestRunPowerShellOutputCwdAndExit(t *testing.T) {
 	result, err := RunPowerShell(context.Background(), workingDirectory, `
 [Console]::Out.WriteLine("AIS_STDOUT_中文")
 [Console]::Error.WriteLine("AIS_STDERR_中文")
-[Console]::Out.WriteLine((Get-Location).Path)
+[Console]::Out.WriteLine("AIS_CWD=" + (Get-Location).Path)
 exit 17
 `)
 	if err != nil {
@@ -236,10 +236,15 @@ exit 17
 	if !bytes.Contains(result.Stdout, []byte("AIS_STDOUT_中文")) {
 		t.Fatalf("unexpected stdout %q", result.Stdout)
 	}
-	normalizedOutput := strings.ToLower(strings.ReplaceAll(string(result.Stdout), "/", `\`))
-	normalizedWorkingDirectory := strings.ToLower(strings.ReplaceAll(workingDirectory, "/", `\`))
-	if !strings.Contains(normalizedOutput, normalizedWorkingDirectory) {
-		t.Fatalf("stdout did not report cwd %q: %q", workingDirectory, result.Stdout)
+	reportedDirectory, err := markerText(result.Stdout, "AIS_CWD=")
+	if err != nil {
+		t.Fatalf("read cwd marker from %q: %v", result.Stdout, err)
+	}
+	wantedInfo, wantedErr := os.Stat(workingDirectory)
+	reportedInfo, reportedErr := os.Stat(reportedDirectory)
+	if wantedErr != nil || reportedErr != nil || !os.SameFile(wantedInfo, reportedInfo) {
+		t.Fatalf("stdout cwd %q is not %q: wanted_err=%v reported_err=%v", reportedDirectory,
+			workingDirectory, wantedErr, reportedErr)
 	}
 	if !bytes.Contains(result.Stderr, []byte("AIS_STDERR_中文")) {
 		t.Fatalf("unexpected stderr %q", result.Stderr)
@@ -306,8 +311,13 @@ func TestConPTYUTF8ResizeInterruptAndCleanup(t *testing.T) {
 				}
 			}
 		}()
+		if err := waitForBytes(ctx, output, []byte("PS ")); err != nil {
+			cancel()
+			session.Close()
+			t.Fatalf("ConPTY shell did not present a prompt: %v output=%q", err, output.Bytes())
+		}
 		if err := session.Write(ctx, []byte(
-			`$s=$Host.UI.RawUI.WindowSize; Write-Output ("AIS_SIZE="+$s.Width+"x"+$s.Height); Write-Output "AIS_READY"; Start-Sleep -Seconds 120`+"\r\n",
+			`$s=$Host.UI.RawUI.WindowSize; Write-Output ("AIS_SIZE="+$s.Width+"x"+$s.Height); Write-Output ("AIS_"+"READY"); Start-Sleep -Seconds 120`+"\r",
 		)); err != nil {
 			cancel()
 			session.Close()
@@ -323,8 +333,12 @@ func TestConPTYUTF8ResizeInterruptAndCleanup(t *testing.T) {
 			session.Close()
 			t.Fatal(err)
 		}
-		time.Sleep(300 * time.Millisecond)
-		if err := session.Write(ctx, []byte(`Write-Output "AIS_CONPTY_DONE_中文"; exit 0`+"\r\n")); err != nil {
+		if err := waitForCount(ctx, output, []byte("PS "), 2); err != nil {
+			cancel()
+			session.Close()
+			t.Fatalf("ConPTY did not return to a prompt after Ctrl-C: %v output=%q", err, output.Bytes())
+		}
+		if err := session.Write(ctx, []byte(`Write-Output ("AIS_CONPTY_"+"DONE_中文"); exit 0`+"\r")); err != nil {
 			cancel()
 			session.Close()
 			t.Fatal(err)
@@ -366,18 +380,25 @@ func withTokenFact(value TokenFacts, change func(*TokenFacts)) TokenFacts {
 }
 
 func markerPID(output []byte, prefix string) (uint32, error) {
+	text, err := markerText(output, prefix)
+	if err != nil {
+		return 0, err
+	}
+	parsed, err := strconv.ParseUint(text, 10, 32)
+	return uint32(parsed), err
+}
+
+func markerText(output []byte, prefix string) (string, error) {
 	text := string(output)
 	index := strings.Index(text, prefix)
 	if index < 0 {
-		return 0, errors.New("PID marker not found")
+		return "", fmt.Errorf("marker %q not found", prefix)
 	}
 	text = text[index+len(prefix):]
-	end := strings.IndexAny(text, "\r\n")
-	if end >= 0 {
+	if end := strings.IndexAny(text, "\r\n"); end >= 0 {
 		text = text[:end]
 	}
-	parsed, err := strconv.ParseUint(strings.TrimSpace(text), 10, 32)
-	return uint32(parsed), err
+	return strings.TrimSpace(text), nil
 }
 
 func processStillRunning(pid uint32) bool {
@@ -405,6 +426,21 @@ func waitForBytes(ctx context.Context, output *lockedBuffer, marker []byte) erro
 	}
 }
 
+func waitForCount(ctx context.Context, output *lockedBuffer, marker []byte, wanted int) error {
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if output.Count(marker) >= wanted {
+			return nil
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
 type lockedBuffer struct {
 	mutex    sync.Mutex
 	contents bytes.Buffer
@@ -420,6 +456,12 @@ func (buffer *lockedBuffer) Contains(marker []byte) bool {
 	buffer.mutex.Lock()
 	defer buffer.mutex.Unlock()
 	return bytes.Contains(buffer.contents.Bytes(), marker)
+}
+
+func (buffer *lockedBuffer) Count(marker []byte) int {
+	buffer.mutex.Lock()
+	defer buffer.mutex.Unlock()
+	return bytes.Count(buffer.contents.Bytes(), marker)
 }
 
 func (buffer *lockedBuffer) Bytes() []byte {
