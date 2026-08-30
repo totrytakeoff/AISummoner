@@ -287,10 +287,6 @@ func TestConPTYUTF8ResizeInterruptAndCleanup(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := session.Resize(101, 37); err != nil {
-			session.Close()
-			t.Fatal(err)
-		}
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		output := &lockedBuffer{}
 		marker := make(chan struct{})
@@ -315,6 +311,13 @@ func TestConPTYUTF8ResizeInterruptAndCleanup(t *testing.T) {
 			cancel()
 			session.Close()
 			t.Fatalf("ConPTY shell did not present a prompt: %v output=%q", err, output.Bytes())
+		}
+		// Resize only after the client has attached. Resizing during console
+		// initialization can legitimately be superseded by the initial attach.
+		if err := session.Resize(101, 37); err != nil {
+			cancel()
+			session.Close()
+			t.Fatal(err)
 		}
 		if err := session.Write(ctx, []byte(
 			`$s=$Host.UI.RawUI.WindowSize; Write-Output ("AIS_SIZE="+$s.Width+"x"+$s.Height); Write-Output ("AIS_"+"READY"); Start-Sleep -Seconds 120`+"\r",
@@ -353,7 +356,9 @@ func TestConPTYUTF8ResizeInterruptAndCleanup(t *testing.T) {
 			t.Fatalf("ConPTY UTF-8/interrupt proof failed: %q", output.Bytes())
 		}
 		if !output.Contains([]byte("AIS_SIZE=101x37")) {
-			t.Logf("ConPTY resize output was terminal-dependent: %q", output.Bytes())
+			cancel()
+			session.Close()
+			t.Fatalf("ConPTY resize was not visible to PowerShell: %q", output.Bytes())
 		}
 		if _, err := session.Wait(ctx); err != nil {
 			cancel()
