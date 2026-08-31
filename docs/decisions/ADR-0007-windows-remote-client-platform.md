@@ -132,3 +132,23 @@ SSH 进程回收、IPC、Qt 与 AppImage 门通过，Windows Task023 probe 仍�
 ConPTY 的生产 constructor 仍未实现，生产 Windows Client 仍不能构建/运行，因此不改变本
 ADR 的 Proposed 状态或接受条件。详细命令、AppImage hash 与已知 DSH 测试夹具见
 `docs/agent_context/tasks/task024/summary.md`。
+
+## Task025 当前证据（2026-08-31）
+
+生产 Windows Core 已实现 LocalAppData/普通交互 token policy、DPAPI CurrentUser + protected
+ACL Device Identity，以及 frozen `LOCAL\\AISummoner.Remote.v1` 的 authenticated named-pipe
+IPC。pipe 在读取 JSON 前核验 exact client PID 的 process-token `TokenLogonSid` 并复核 PID；
+Identity 对 partial/corrupt/mismatch/DPAPI failure 均 fail closed。Task023 的 security/pipe
+probe 已改为调用同一生产 helper，避免两套实现漂移。
+
+最终证据为
+[run 33359386282](https://github.com/totrytakeoff/AISummoner/actions/runs/33359386282)：
+Windows Server 2022 原生测试、vet、真实生产 Core build、Qt/MSVC CTest、Qt→Go named-pipe
+status/events 均通过，同时 Ubuntu 22.04 的现有 Core normal/race/vet 回归通过。artifact
+`9746246672` 内的 unsigned 工程 ZIP 包含真实 `aisummoner-client.exe`，其 SHA-256 为
+`7f2046f8f31f0f093e5d62827e082f5706c944c41708ca4b1baa5f97a11fb179`。
+
+Task025 仍不改变本 ADR 的 Proposed 状态：Windows exec/shell 在生产 backend 中明确拒绝，
+等待 Task026 PowerShell/Job 与 Task027 ConPTY；hosted runner 仍是 elevated Server 2022，
+尚缺 ordinary-user Windows 11/10、第二 logon、clean VM、真实 Tunnel/Terminal/Agent 和签名
+交付证据。Git Bash/MSYS2 不作为强制依赖；未来只能作为显式可选 Execution Profile。

@@ -15,11 +15,12 @@ updated_by: coder
   for Tasks025-027, and Proposed ADR-0007 is not accepted by this checkpoint.
   No independent review is inferred.
 
-- [ ] task025 (in progress): connect the production Windows Runtime, DPAPI/ACL
-  Identity and authenticated named-pipe IPC to Task024's seams, add an explicit
-  unsupported SSH backend, build the real Core and package an unsigned
-  engineering ZIP. Native PowerShell remains the first shell contract; Git
-  Bash is only a possible later optional profile, not a bundled dependency.
+- [x] task025 (ready for human review): production Windows Runtime, DPAPI/ACL
+  Identity and authenticated named-pipe IPC are connected to Task024's seams.
+  Native Windows and Linux CI build/test/vet the real Core, Qt-to-Go IPC passes,
+  and the checksummed unsigned engineering ZIP contains the production
+  `aisummoner-client.exe`. Exec/shell reject explicitly until Tasks026-027;
+  Git Bash is only a possible later optional profile, not a bundled dependency.
 
 - [ ] task023 (in progress): Windows Server 2022 CI now proves the strict
   Qt↔Go named-pipe path, exact peer-token check, DPAPI/ACL, suspended Job,
@@ -88,8 +89,9 @@ updated_by: coder
 
 ## Next
 
-- [ ] Finish task025 and hand its production Windows Core/IPC evidence to
-  Task026; unsupported Terminal/Agent operations must remain fail closed.
+- [ ] Review task025, then start task026's native PowerShell/Job Object exec;
+  unsupported Terminal/Agent operations remain fail closed until their own
+  production backends pass.
 - [ ] Complete Task023's ordinary-user Windows 11/10, wrong-logon and clean-VM
   evidence before accepting or revising Proposed ADR-0007. This validation now
   runs alongside the user-authorized, non-enabling Task024 extraction.

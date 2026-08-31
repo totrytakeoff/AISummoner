@@ -87,9 +87,11 @@ updated_by: coder
   SSH execution seams extracted; strict `linux|windows` hello plus Linux
   daemon/SSH/Qt/AppImage gates pass. The user authorized advancing without
   fabricating an independent review.
-- [ ] A8.1 task025 (in progress): implement Windows per-user Core, DPAPI
-  Identity, private named-pipe IPC and an explicit fail-closed SSH execution
-  boundary. Task023 desktop VM evidence remains release debt.
+- [x] A8.1 task025 (ready for human review): production Windows per-user Core,
+  DPAPI Identity, private named-pipe IPC and an explicit fail-closed SSH
+  execution boundary pass native Windows plus Linux regression CI. The
+  checksummed unsigned engineering ZIP contains the real Core; Task023 desktop
+  VM evidence remains release debt.
 - [ ] A8.2 task026-task027: implement PowerShell exec/Job cleanup and ConPTY
   Terminal through the real WSS/yamux/strict-SSH chain.
 - [ ] A8.3 task028-task029: ship a clean-VM Qt engineering ZIP, add the trusted

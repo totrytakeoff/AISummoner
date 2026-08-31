@@ -1,7 +1,7 @@
 ---
 task_id: task025
 type: plan
-status: ready_for_implementation
+status: ready_for_review
 from: planner
 to: coder
 revision: 0
@@ -12,10 +12,10 @@ requires_review: true
 
 ## Status
 
-Ready for implementation. The user explicitly authorized continued native
-Windows work after Task024 and set the end goal of a usable Windows Remote.
-This task is the first production backend slice; it does not claim Terminal or
-Agent execution before Tasks026-029.
+Implementation complete and ready for human review. The user explicitly
+authorized continued native Windows work after Task024 and set the end goal of
+a usable Windows Remote. This task is the first production backend slice; it
+does not claim Terminal or Agent execution before Tasks026-029.
 
 ## Context
 

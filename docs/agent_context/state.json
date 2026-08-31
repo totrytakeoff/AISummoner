@@ -3,11 +3,11 @@
   "project": "AISummoner",
   "context_dir": "docs/agent_context",
   "current_task": "task025",
-  "current_stage": "coding",
+  "current_stage": "review",
   "status": "running",
   "iteration": 0,
-  "last_decision": "HUMAN_AUTHORIZED_TASK025_NATIVE_WINDOWS_CORE_GIT_BASH_OPTIONAL_ONLY",
-  "next_agent": "coder",
+  "last_decision": "TASK025_WINDOWS_CORE_READY_FOR_HUMAN_REVIEW_EXEC_SHELL_FAIL_CLOSED",
+  "next_agent": "human_reviewer",
   "max_revisions_per_task": 3,
-  "updated_at": "2026-08-31T12:45:12+08:00"
+  "updated_at": "2026-08-31T13:14:04+08:00"
 }

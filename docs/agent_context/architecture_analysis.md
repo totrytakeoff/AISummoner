@@ -22,14 +22,17 @@ The strongest reusable assets are the trust chain, owner-scoped persistence,
 Tunnel/SSH lifecycle, Terminal data plane, Qt Remote GUI and the source-aligned
 DSH presentation baseline. DSH now also exposes native redacted Provider
 configuration and current-Session model selection through optional common
-capabilities. Linux remains the only implemented Remote OS. Windows has been
-audited as a platform boundary rather than a cross-compile, and Task024 now
-separates common Core behavior from build-tagged Runtime policy, Identity
-storage, IPC transport and SSH execution backends. Windows still needs the
-named-pipe/DPAPI/PowerShell/ConPTY/Job Object implementations and Agent
-target-shell awareness. The primary product debt is the remaining one-Turn lifecycle,
-incomplete Runtime capabilities and the unproved Windows platform seam rather
-than Controller chrome.
+capabilities. Linux remains the only supported Remote OS. Windows has been
+audited as a platform boundary rather than a cross-compile: Task024 separated
+common Core behavior from build-tagged Runtime policy, Identity storage, IPC
+transport and SSH execution backends, and Task025 connected production Windows
+token/LocalAppData, DPAPI/ACL Identity and authenticated named-pipe IPC. The
+real Windows Core now builds and serves the status/pairing foundation, while
+exec and shell fail closed pending PowerShell/Job Object and ConPTY. Agent
+target-shell awareness and desktop/E2E proof also remain. The primary product
+debt is the remaining one-Turn lifecycle, incomplete Runtime capabilities and
+the still-unproved Windows execution/platform seam rather than Controller
+chrome.
 
 ## Alpha Target Shape
 
@@ -147,9 +150,10 @@ not a separate Windows product fork.
    native Provider/model configuration is complete.
 4. Enrich OpenCode, then add Codex and Claude using the same contracts.
 5. Prove the Windows backend contracts and extract the common platform seams.
-   **Windows Server 2022 contracts and the Task024 extraction are complete.**
-   Implement Core/IPC/exec/ConPTY/Qt next, then add a trusted Agent Execution
-   Profile without weakening Linux behavior.
+   **Windows Server 2022 contracts, the Task024 extraction and Task025 native
+   Core/DPAPI/named-pipe implementation are complete.** Implement PowerShell/
+   Job exec, ConPTY and Qt desktop acceptance next, then add a trusted Agent
+   Execution Profile without weakening Linux behavior.
 6. Add structured file/diff and Desktop capabilities only through separate ADRs.
 
 Old routes should redirect for at least one migration release. Existing Session

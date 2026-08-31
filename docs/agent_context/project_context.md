@@ -84,11 +84,14 @@ AISummoner is a browser-controlled, server-side Agent and SSH remote execution p
   authenticated named-pipe IPC, DPAPI identity, PowerShell/ConPTY/Job Objects,
   native Qt packaging and a target-aware Agent execution profile. Task023's
   Windows Server 2022 CI proved the reusable native API/toolchain contracts;
-  Task024 has now extracted production Runtime policy, Identity storage, IPC
-  transport and SSH execution seams while preserving Linux AppImage/SSH gates
-  and enabling only the strict hello enum. Concrete Windows Core backends,
-  ordinary-user Windows 11/10, wrong-logon, clean-VM and production E2E remain,
-  so Windows is not yet supported and ADR-0007 remains Proposed.
+  Task024 extracted production Runtime policy, Identity storage, IPC transport
+  and SSH execution seams, and Task025 now connects real Windows LocalAppData/
+  token policy, DPAPI/ACL Identity and authenticated named-pipe IPC to them.
+  The production Windows Core builds and its status/pairing foundation passes
+  native CI, while exec and shell intentionally reject until PowerShell/Job and
+  ConPTY land. Ordinary-user Windows 11/10, wrong-logon, clean-VM, real Terminal/
+  Agent and production E2E remain, so Windows is not yet supported and
+  ADR-0007 remains Proposed.
 
 ## Constraints
 

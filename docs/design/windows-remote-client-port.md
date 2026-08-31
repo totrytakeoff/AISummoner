@@ -46,10 +46,12 @@ Job、ConPTY、Qt/MSVC 与工程打包合同。Task024 随后完成生产代码�
 - Tunnel hello：严格 `linux|windows` 枚举，协议版本仍为 1。
 
 Linux daemon、IPC、真实 SSH exec/PTY/进程树回收、Qt CTest 与 GUI+daemon AppImage 均已
-回归；AppImage 打包也固定为最多两个 mksquashfs worker。生产 Windows build 会明确停在
-尚未实现的 backend constructor，不再误入 Unix API，也没有用 no-op 假实现冒充支持。
-下一步是 Task025 的 Windows Runtime/DPAPI/named-pipe Core；Windows 仍未成为支持平台，
-ADR-0007 仍为 Proposed。
+回归；AppImage 打包也固定为最多两个 mksquashfs worker。Task025 现已把 Windows 普通用户
+token/LocalAppData、DPAPI/ACL Identity 和认证 named pipe 接入这些生产 seam；真实
+`aisummoner-client.exe`、Qt→Go IPC 与 Linux normal/race/vet 已在最终 CI 通过，并生成带
+SHA-256 的 unsigned 工程 ZIP。Windows SSH exec/shell 仍明确拒绝，不用 no-op 冒充支持。
+下一步是 Task026 的 PowerShell/Job Object exec，然后才是 Task027 ConPTY；Windows 仍未成为
+支持平台，ADR-0007 仍为 Proposed。
 
 ## Task024 前代码审计
 
@@ -375,6 +377,8 @@ AppImage、daemon、Terminal 和 Agent 回归全绿；扩展 hello platform enum
 daemon joined lifecycle。此时 CLI/status 可在 Windows 工作，但还不宣称 Terminal 可用。
 实现期间使用明确拒绝 exec/shell 的 Windows SSH backend 让 Core 可构建；它不是成功返回的
 占位实现。Git Bash 不进入本任务依赖。
+**实现完成，最终 Windows/Linux CI 与工程 ZIP 证据已移交人工 review；不代表 Terminal、
+Agent 或 Windows 正式支持。**
 
 ### Task026：Windows exec 与 Job Object
 
