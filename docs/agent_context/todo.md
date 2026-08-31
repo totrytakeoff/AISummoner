@@ -8,11 +8,18 @@ updated_by: coder
 
 ## Current
 
-- [x] task024 (ready for review): extracted build-tagged
+- [x] task024 (human-authorized to advance): extracted build-tagged
   paths/privilege/lifecycle, Identity storage, local IPC transport and SSH
   process backends; Linux daemon/SSH/Qt/AppImage regressions pass and Tunnel
   hello is the strict `linux|windows` enum. Windows constructors remain absent
   for Tasks025-027, and Proposed ADR-0007 is not accepted by this checkpoint.
+  No independent review is inferred.
+
+- [ ] task025 (in progress): connect the production Windows Runtime, DPAPI/ACL
+  Identity and authenticated named-pipe IPC to Task024's seams, add an explicit
+  unsupported SSH backend, build the real Core and package an unsigned
+  engineering ZIP. Native PowerShell remains the first shell contract; Git
+  Bash is only a possible later optional profile, not a bundled dependency.
 
 - [ ] task023 (in progress): Windows Server 2022 CI now proves the strict
   Qt↔Go named-pipe path, exact peer-token check, DPAPI/ACL, suspended Job,
@@ -81,10 +88,8 @@ updated_by: coder
 
 ## Next
 
-- [ ] task025: implement the real Windows per-user Runtime, LocalAppData/token
-  gate, DPAPI Identity and authenticated named-pipe IPC against Task024's
-  seams. A fail-closed unsupported SSH execution backend may keep pairing/
-  status usable until Task026, but it must never report Terminal success.
+- [ ] Finish task025 and hand its production Windows Core/IPC evidence to
+  Task026; unsupported Terminal/Agent operations must remain fail closed.
 - [ ] Complete Task023's ordinary-user Windows 11/10, wrong-logon and clean-VM
   evidence before accepting or revising Proposed ADR-0007. This validation now
   runs alongside the user-authorized, non-enabling Task024 extraction.

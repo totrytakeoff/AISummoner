@@ -2,12 +2,12 @@
   "workflow_id": "AISummoner-2026-08-12-001",
   "project": "AISummoner",
   "context_dir": "docs/agent_context",
-  "current_task": "task024",
-  "current_stage": "implementation_summary",
+  "current_task": "task025",
+  "current_stage": "coding",
   "status": "running",
   "iteration": 0,
-  "last_decision": "TASK024_PLATFORM_SEAMS_READY_FOR_REVIEW_WINDOWS_BACKENDS_ABSENT",
-  "next_agent": "human_reviewer",
+  "last_decision": "HUMAN_AUTHORIZED_TASK025_NATIVE_WINDOWS_CORE_GIT_BASH_OPTIONAL_ONLY",
+  "next_agent": "coder",
   "max_revisions_per_task": 3,
-  "updated_at": "2026-08-31T11:40:45+08:00"
+  "updated_at": "2026-08-31T12:45:12+08:00"
 }

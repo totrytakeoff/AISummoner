@@ -206,6 +206,18 @@ DPAPI CurrentUser 的目的不是防御同用户恶意进程，而是避免离�
 
 ## Windows 远程执行
 
+### Shell 策略：原生优先，Git Bash 可选但不内置
+
+首版继续以系统自带 Windows PowerShell 5.1 为唯一强制执行环境，不在客户端内捆绑 Git
+Bash/MSYS2。Git Bash 可以减少一部分模型生成 Bash 命令时的适配工作，但不会消除 Windows
+原生 token、DPAPI、Named Pipe、Job Object、ConPTY、路径和 GUI 生命周期问题；反而会立即
+引入第二套路径转换/quoting、第三方组件许可清单、更新与漏洞响应以及明显更大的安装包。
+
+正确的 Agent 兼容边界是 Server 派生的 Execution Profile，让模型明确知道目标是
+`windows-powershell`，而不是用 POSIX 外观隐藏真实 OS。后续若用户机器已安装 Git for
+Windows，可通过独立 task/能力协商增加显式 `git-bash` profile；不得自动探测后静默切换，
+不得由 Browser 或模型自行声明，也不影响 PowerShell/ConPTY 作为原生保底路径。
+
 ### 共同 SSH 层
 
 SSH channel 和 request 合同继续兼容：
@@ -361,6 +373,8 @@ AppImage、daemon、Terminal 和 Agent 回归全绿；扩展 hello platform enum
 
 完成 LocalAppData、普通 token gate、DPAPI identity、named pipe IPC、single instance 和
 daemon joined lifecycle。此时 CLI/status 可在 Windows 工作，但还不宣称 Terminal 可用。
+实现期间使用明确拒绝 exec/shell 的 Windows SSH backend 让 Core 可构建；它不是成功返回的
+占位实现。Git Bash 不进入本任务依赖。
 
 ### Task026：Windows exec 与 Job Object
 

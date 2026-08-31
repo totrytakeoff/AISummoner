@@ -85,10 +85,11 @@ updated_by: coder
   stays Proposed.
 - [x] A8.1 task024: common Runtime policy, Identity storage, IPC transport and
   SSH execution seams extracted; strict `linux|windows` hello plus Linux
-  daemon/SSH/Qt/AppImage gates pass. Independent review remains.
-- [ ] A8.1 task025: implement Windows per-user Core, DPAPI Identity and private
-  named-pipe IPC. Task023 desktop VM evidence is still release debt; Task024
-  does not accept ADR-0007.
+  daemon/SSH/Qt/AppImage gates pass. The user authorized advancing without
+  fabricating an independent review.
+- [ ] A8.1 task025 (in progress): implement Windows per-user Core, DPAPI
+  Identity, private named-pipe IPC and an explicit fail-closed SSH execution
+  boundary. Task023 desktop VM evidence remains release debt.
 - [ ] A8.2 task026-task027: implement PowerShell exec/Job cleanup and ConPTY
   Terminal through the real WSS/yamux/strict-SSH chain.
 - [ ] A8.3 task028-task029: ship a clean-VM Qt engineering ZIP, add the trusted
