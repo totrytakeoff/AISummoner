@@ -75,13 +75,6 @@ exit 9
 		t.Fatalf("bounded PowerShell output = %+v", large)
 	}
 
-	if _, err := fixture.dialer.OpenPTY(
-		context.Background(), fixture.deviceID,
-		PTYOptions{Cols: 80, Rows: 24, CWD: directory},
-	); err == nil {
-		t.Fatal("Windows interactive shell succeeded before the ConPTY task")
-	}
-
 	for _, signal := range []struct {
 		name       string
 		exitStatus uint32
@@ -203,7 +196,6 @@ func TestWindowsTunnelSSHConPTYEndToEnd(t *testing.T) {
 	if err := handle.Resize(101, 37); err != nil {
 		t.Fatal(err)
 	}
-	initialPrompts := capture.Count([]byte("PS "))
 	command := `$s=$Host.UI.RawUI.WindowSize; ` +
 		`Write-Output ("AIS_PTY_"+"SIZE="+$s.Width+"x"+$s.Height); ` +
 		`Write-Output ("AIS_PTY_"+"CWD="+(Get-Location).Path); ` +
@@ -213,10 +205,11 @@ func TestWindowsTunnelSSHConPTYEndToEnd(t *testing.T) {
 	}
 	waitForWindowsPTYBytes(t, terminalContext, capture, []byte("AIS_PTY_READY_中文"))
 	waitForWindowsPTYBytes(t, terminalContext, capture, []byte("AIS_PTY_SIZE=101x37"))
+	promptsBeforeInterrupt := capture.Count([]byte("PS "))
 	if _, err := handle.Input().Write([]byte{3}); err != nil {
 		t.Fatal(err)
 	}
-	waitForWindowsPTYCount(t, terminalContext, capture, []byte("PS "), initialPrompts+1)
+	waitForWindowsPTYCount(t, terminalContext, capture, []byte("PS "), promptsBeforeInterrupt+1)
 	if _, err := io.WriteString(
 		handle.Input(), `Write-Output ("AIS_PTY_"+"DONE_中文"); exit 0`+"\r",
 	); err != nil {
