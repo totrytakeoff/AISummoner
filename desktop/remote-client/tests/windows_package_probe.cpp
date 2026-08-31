@@ -18,6 +18,7 @@
 #include <QThread>
 #include <QTimer>
 
+#include <cstdio>
 #include <iterator>
 #include <string>
 
@@ -119,13 +120,13 @@ bool processIsActive(HANDLE process)
     return process && GetExitCodeProcess(process, &exitCode) && exitCode == STILL_ACTIVE;
 }
 
-bool waitForStatus(RemoteStatus *status)
+bool waitForStatus(RemoteStatus *status, int timeoutMs = 15000)
 {
     DaemonClient client(AppSettings::defaultSocketPath(), nullptr, 1000, 100);
     QEventLoop loop;
     QTimer timeout;
     timeout.setSingleShot(true);
-    timeout.setInterval(15000);
+    timeout.setInterval(timeoutMs);
     bool received = false;
     QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
     QObject::connect(&client, &DaemonClient::statusChanged, &loop,
@@ -139,6 +140,69 @@ bool waitForStatus(RemoteStatus *status)
     loop.exec();
     client.stop();
     return received && client.isAvailable();
+}
+
+void diagnoseCoreStartup(const QString &stage, const QString &dataDirectory,
+                         NativeProcess *core)
+{
+    QJsonObject diagnostic{
+        {QStringLiteral("core_active"), processIsActive(core->handle)},
+        {QStringLiteral("data_directory"), dataDirectory},
+        {QStringLiteral("generic_data_directory"),
+         QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)},
+        {QStringLiteral("home_directory"), QDir::homePath()},
+        {QStringLiteral("local_appdata_environment"),
+         QString::fromLocal8Bit(qgetenv("LOCALAPPDATA"))},
+        {QStringLiteral("socket_name"), AppSettings::defaultSocketPath()},
+        {QStringLiteral("user_profile_environment"),
+         QString::fromLocal8Bit(qgetenv("USERPROFILE"))},
+    };
+    DWORD exitCode = 0;
+    if (core->handle && GetExitCodeProcess(core->handle, &exitCode)) {
+        diagnostic.insert(QStringLiteral("core_exit_code"), static_cast<qint64>(exitCode));
+    }
+    if (processIsActive(core->handle)) {
+        TerminateProcess(core->handle, 97);
+        WaitForSingleObject(core->handle, 10000);
+    }
+
+    QDir(dataDirectory).removeRecursively();
+    QString validationError;
+    const auto spec = DaemonLauncher::buildLaunchSpec(
+        stage, dataDirectory, QStringLiteral("https://127.0.0.1:1"),
+        QStringLiteral("task028-package-diagnostic"), &validationError);
+    diagnostic.insert(QStringLiteral("diagnostic_spec_valid"), spec.has_value());
+    if (!spec) {
+        diagnostic.insert(QStringLiteral("diagnostic_spec_error"), validationError);
+    } else {
+        QProcess replay;
+        QtProcessGuard replayGuard{&replay};
+        replay.setProgram(spec->program);
+        replay.setArguments(spec->arguments);
+        replay.setWorkingDirectory(spec->workingDirectory);
+        replay.setProcessChannelMode(QProcess::MergedChannels);
+        replay.start();
+        const bool started = replay.waitForStarted(10000);
+        diagnostic.insert(QStringLiteral("diagnostic_started"), started);
+        if (!started) {
+            diagnostic.insert(QStringLiteral("diagnostic_process_error"), replay.errorString());
+        } else {
+            RemoteStatus ignored;
+            diagnostic.insert(QStringLiteral("diagnostic_ipc_available"),
+                              waitForStatus(&ignored, 5000));
+            diagnostic.insert(QStringLiteral("diagnostic_running"),
+                              replay.state() != QProcess::NotRunning);
+            if (replay.state() == QProcess::NotRunning) {
+                diagnostic.insert(QStringLiteral("diagnostic_exit_code"), replay.exitCode());
+            }
+        }
+        diagnostic.insert(QStringLiteral("diagnostic_output"),
+                          QString::fromUtf8(replay.readAll().left(8192)));
+    }
+    const QByteArray message = QJsonDocument(diagnostic).toJson(QJsonDocument::Compact);
+    fwrite(message.constData(), 1, static_cast<size_t>(message.size()), stderr);
+    fwrite("\n", 1, 1, stderr);
+    fflush(stderr);
 }
 
 struct WindowSearch {
@@ -251,7 +315,10 @@ int runProbe(const QString &stagePath)
     NativeProcess core;
     if (!waitForNewProcess(corePath, before, &core)) return 66;
     RemoteStatus firstStatus;
-    if (!waitForStatus(&firstStatus)) return 67;
+    if (!waitForStatus(&firstStatus)) {
+        diagnoseCoreStartup(stage, dataDirectory, &core);
+        return 67;
+    }
     launcher.setDaemonAvailable(true);
 
     QProcess gui;

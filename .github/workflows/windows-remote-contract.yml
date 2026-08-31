@@ -222,10 +222,16 @@ jobs:
             Copy-Item -Recurse -Force dist/AISummoner-Windows-Remote $publicStage
             Copy-Item build/windows-remote/Release/aisummoner_windows_package_probe.exe $publicStage
             $probePath = Join-Path $publicStage "aisummoner_windows_package_probe.exe"
+            $probeStdout = Join-Path $publicStage "package-probe.stdout.txt"
+            $probeStderr = Join-Path $publicStage "package-probe.stderr.txt"
             $process = Start-Process -FilePath $probePath `
               -ArgumentList @("--stage", $publicStage) `
-              -Credential $credential -LoadUserProfile -PassThru -Wait
+              -Credential $credential -LoadUserProfile `
+              -RedirectStandardOutput $probeStdout -RedirectStandardError $probeStderr `
+              -PassThru -Wait
             if ($process.ExitCode -ne 0) {
+              Get-Content -Raw -ErrorAction SilentlyContinue $probeStdout | Write-Host
+              Get-Content -Raw -ErrorAction SilentlyContinue $probeStderr | Write-Host
               throw "ordinary-user package probe failed with $($process.ExitCode)"
             }
             $proofPath = Join-Path $profilePath `
