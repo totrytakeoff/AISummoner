@@ -47,8 +47,10 @@ target_compile_options(aisummoner_remote_ui PRIVATE
 if(WIN32)
     qt_add_executable(aisummoner-client-ui WIN32
         src/main.cpp
-        resources/aisummoner-client-ui.ico
         resources/aisummoner-client-ui.rc
+    )
+    set_property(SOURCE resources/aisummoner-client-ui.rc PROPERTY OBJECT_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources/aisummoner-client-ui.ico"
     )
 else()
     qt_add_executable(aisummoner-client-ui src/main.cpp)

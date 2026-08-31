@@ -1,0 +1,18 @@
+Qt 6.8.3 corresponding-source offer
+====================================
+
+This package dynamically links unmodified Qt 6.8.3 libraries and plugins under
+the GNU Lesser General Public License version 3 (or another license identified
+in THIRD_PARTY_LICENSES/Qt for a particular component).
+
+For at least three years after this package is made available, the AISummoner
+contributors will provide the complete corresponding source for the exact Qt
+6.8.3 components distributed here, including the applicable build and
+installation information, for no more than the reasonable physical cost of
+providing it. Request it by opening a public issue in the AISummoner GitHub
+repository and naming the source commit from package-build.json.
+
+The application loads Qt from replaceable DLLs and does not prohibit reverse
+engineering for debugging modifications to those LGPL-covered libraries. The
+full license texts and Qt third-party license notices are bundled under
+THIRD_PARTY_LICENSES/Qt.

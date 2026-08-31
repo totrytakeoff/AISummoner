@@ -27,3 +27,17 @@ Licensed under the MIT License:
 > LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 > OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 > SOFTWARE.
+
+## Qt 6
+
+The Remote Desktop UI dynamically links Qt 6 Core, Gui, Widgets, Network and
+SVG libraries and their deployed plugins. Windows engineering packages are
+built with Qt 6.8.3 under its open-source licensing option. Qt is primarily
+available under GNU LGPL version 3 or GNU GPL version 3; individual bundled
+components also carry the third-party licenses supplied by Qt.
+
+Windows packages include the complete installed Qt license set under
+`THIRD_PARTY_LICENSES/Qt` and a `QT_SOURCE_OFFER.txt` for the exact distributed
+version. Recipients may replace the dynamically linked Qt DLLs and retain all
+rights provided by their applicable licenses. Qt and the Qt logo are trademarks
+of The Qt Company Ltd.; AISummoner is not affiliated with The Qt Company.

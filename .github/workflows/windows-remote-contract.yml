@@ -271,3 +271,21 @@ jobs:
           go test -buildvcs=false -count=1 "${packages[@]}"
           go test -buildvcs=false -count=1 -race "${packages[@]:0:6}"
           go vet -buildvcs=false "${packages[@]}"
+
+      - name: Install Linux Qt build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends qt6-base-dev
+
+      - name: Test Linux Qt Remote UI
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -euo pipefail
+          cmake -S desktop/remote-client -B build/linux-remote \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake --build build/linux-remote --parallel 2
+          ctest --test-dir build/linux-remote --output-on-failure -j 1

@@ -21,6 +21,7 @@ endif()
 foreach(path IN ITEMS "${GUI_EXECUTABLE}" "${CORE_EXECUTABLE}"
                       "${root}/LICENSE" "${root}/THIRD_PARTY_NOTICES.md"
                       "${root}/deploy/windows/README.txt"
+                      "${root}/deploy/windows/QT_SOURCE_OFFER.txt"
                       "${root}/cmd/aisummoner-client/aisummoner-client.manifest")
     if(NOT EXISTS "${path}")
         message(FATAL_ERROR "required package source is missing: ${path}")
@@ -43,7 +44,24 @@ file(REMOVE_RECURSE "${stage}")
 file(MAKE_DIRECTORY "${stage}")
 file(COPY "${GUI_EXECUTABLE}" "${CORE_EXECUTABLE}" DESTINATION "${stage}")
 file(COPY "${root}/LICENSE" "${root}/THIRD_PARTY_NOTICES.md" DESTINATION "${stage}")
-file(COPY "${root}/deploy/windows/README.txt" DESTINATION "${stage}")
+file(COPY "${root}/deploy/windows/README.txt"
+          "${root}/deploy/windows/QT_SOURCE_OFFER.txt" DESTINATION "${stage}")
+
+get_filename_component(qt_bin "${WINDEPLOYQT_EXECUTABLE}" DIRECTORY)
+get_filename_component(qt_prefix "${qt_bin}" DIRECTORY)
+set(qt_license_root "")
+foreach(candidate IN ITEMS "${qt_prefix}/LICENSES" "${qt_prefix}/licenses"
+                           "${qt_prefix}/../LICENSES" "${qt_prefix}/../../LICENSES")
+    if(EXISTS "${candidate}/LGPL-3.0-only.txt")
+        file(REAL_PATH "${candidate}" qt_license_root)
+        break()
+    endif()
+endforeach()
+if(qt_license_root STREQUAL "")
+    message(FATAL_ERROR "Qt open-source license texts were not found beside windeployqt")
+endif()
+file(MAKE_DIRECTORY "${stage}/THIRD_PARTY_LICENSES/Qt")
+file(COPY "${qt_license_root}/" DESTINATION "${stage}/THIRD_PARTY_LICENSES/Qt")
 
 execute_process(
     COMMAND "${WINDEPLOYQT_EXECUTABLE}" --release --compiler-runtime --no-translations
@@ -61,6 +79,7 @@ foreach(required IN ITEMS
         aisummoner-client.exe
         LICENSE
         THIRD_PARTY_NOTICES.md
+        QT_SOURCE_OFFER.txt
         README.txt
         Qt6Core.dll
         Qt6Gui.dll
@@ -68,6 +87,8 @@ foreach(required IN ITEMS
         Qt6Widgets.dll
         platforms/qwindows.dll
         tls/qschannelbackend.dll
+        THIRD_PARTY_LICENSES/Qt/LGPL-3.0-only.txt
+        THIRD_PARTY_LICENSES/Qt/Qt-GPL-exception-1.0.txt
         vc_redist.x64.exe)
     if(NOT EXISTS "${stage}/${required}")
         message(FATAL_ERROR "Windows package is missing ${required}")
@@ -132,7 +153,8 @@ foreach(entry IN LISTS package_files)
     endif()
 endforeach()
 
-foreach(text_file IN ITEMS README.txt LICENSE THIRD_PARTY_NOTICES.md package-build.json)
+foreach(text_file IN ITEMS README.txt LICENSE THIRD_PARTY_NOTICES.md
+                           QT_SOURCE_OFFER.txt package-build.json)
     file(READ "${stage}/${text_file}" text_contents)
     string(FIND "${text_contents}" "${root}" leaked_root)
     if(NOT leaked_root EQUAL -1)

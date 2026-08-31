@@ -6,6 +6,10 @@ Windows release and may trigger Microsoft Defender SmartScreen. Verify the ZIP
 SHA-256 before extracting it. Do not disable antivirus or Windows security
 features to run it.
 
+AISummoner's MIT license, third-party notices, the Qt license set and the Qt
+corresponding-source offer are included. The Qt DLLs remain replaceable; do not
+delete `THIRD_PARTY_LICENSES` when redistributing this package.
+
 Quick start
 -----------
 
