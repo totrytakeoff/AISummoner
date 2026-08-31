@@ -152,3 +152,22 @@ Task025 仍不改变本 ADR 的 Proposed 状态：Windows exec/shell 在生产 b
 等待 Task026 PowerShell/Job 与 Task027 ConPTY；hosted runner 仍是 elevated Server 2022，
 尚缺 ordinary-user Windows 11/10、第二 logon、clean VM、真实 Tunnel/Terminal/Agent 和签名
 交付证据。Git Bash/MSYS2 不作为强制依赖；未来只能作为显式可选 Execution Profile。
+
+## Task026 当前证据（2026-08-31）
+
+生产 Windows SSH 非 PTY exec 已使用系统 Windows PowerShell 5.1、UTF-16LE
+`-EncodedCommand`、显式标准 handle list、suspended CreateProcess 和 kill-on-close Job
+Object。正常 leader 退出、context/channel 取消、Tunnel shutdown、TERM/KILL 都会终止并等待
+完整 Job 与 I/O workers；非 PTY INT 明确拒绝，交互 shell 继续 fail closed。
+
+最终证据为
+[run 33361499043](https://github.com/totrytakeoff/AISummoner/actions/runs/33361499043)：
+Windows Server 2022 上的真实 Device challenge、TLS/WSS、yamux、strict SSH client 与生产
+Embedded SSHD 全链路通过，并证明 UTF-8 stdout/stderr、cwd、exit status、输出 drain、子孙
+回收和无关进程不受影响；Windows vet/Core build、Qt CTest/IPC/打包与 Ubuntu normal/race/vet
+回归也通过。artifact `9746897971` 内层工程 ZIP 的 SHA-256 为
+`1dfc76ebec8fd81eb6d0811cccc26ad54c8518a98156d487f39712a5f7c3b9da`。
+
+本证据仍不接受 ADR：生产 ConPTY、ordinary-user Windows 11/10、第二 logon、clean VM、GUI
+无 console flash/保活、可信 Agent Execution Profile/真实 DSH Turn 和签名交付尚未完成。
+Git Bash/MSYS2 仍未内置，也不是原生 PowerShell/ConPTY 的替代品。

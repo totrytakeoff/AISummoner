@@ -3,11 +3,11 @@
   "project": "AISummoner",
   "context_dir": "docs/agent_context",
   "current_task": "task026",
-  "current_stage": "coding",
+  "current_stage": "review",
   "status": "running",
   "iteration": 0,
-  "last_decision": "ACTIVE_USER_GOAL_ADVANCES_TASK026_WITH_TASK025_REVIEW_DEBT_RECORDED",
-  "next_agent": "coder",
+  "last_decision": "TASK026_READY_FOR_HUMAN_REVIEW_WITH_TASK025_REVIEW_DEBT_RECORDED",
+  "next_agent": "human_reviewer",
   "max_revisions_per_task": 3,
-  "updated_at": "2026-08-31T13:26:08+08:00"
+  "updated_at": "2026-08-31T13:50:57+08:00"
 }

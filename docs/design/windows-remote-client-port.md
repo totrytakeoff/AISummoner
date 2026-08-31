@@ -49,9 +49,10 @@ Linux daemon、IPC、真实 SSH exec/PTY/进程树回收、Qt CTest 与 GUI+daem
 回归；AppImage 打包也固定为最多两个 mksquashfs worker。Task025 现已把 Windows 普通用户
 token/LocalAppData、DPAPI/ACL Identity 和认证 named pipe 接入这些生产 seam；真实
 `aisummoner-client.exe`、Qt→Go IPC 与 Linux normal/race/vet 已在最终 CI 通过，并生成带
-SHA-256 的 unsigned 工程 ZIP。Windows SSH exec/shell 仍明确拒绝，不用 no-op 冒充支持。
-下一步是 Task026 的 PowerShell/Job Object exec，然后才是 Task027 ConPTY；Windows 仍未成为
-支持平台，ADR-0007 仍为 Proposed。
+SHA-256 的 unsigned 工程 ZIP。Task026 随后把生产 SSH 非 PTY exec 接到系统 Windows
+PowerShell 5.1、suspended Job assignment 与 joined descendant cleanup，并通过真实
+TLS/WSS→yamux→strict SSH 原生链路。交互 shell 仍明确拒绝，不用 no-op 冒充 ConPTY；下一步
+是 Task027。Windows 仍未成为支持平台，ADR-0007 仍为 Proposed。
 
 ## Task024 前代码审计
 
@@ -384,8 +385,8 @@ Agent 或 Windows 正式支持。**
 
 完成 PowerShell 非 PTY exec、cwd、stdout/stderr/exit、timeout/cancel 和完整进程树回收，并
 通过真实 TLS/WSS/yamux/strict SSH 链路；这是 Agent transport 的底座。
-**当前实现任务：Task025 的独立 review 仍作为债务记录，持续用户目标只授权推进，不视为
-review verdict。**
+**实现完成，最终 Windows/Linux CI 与 unsigned 工程 ZIP 证据已移交人工 review；shell 仍
+fail closed，Task025-026 的独立 review 继续作为债务记录。**
 
 ### Task027：ConPTY Terminal
 

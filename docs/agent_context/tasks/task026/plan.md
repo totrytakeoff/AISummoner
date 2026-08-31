@@ -1,7 +1,7 @@
 ---
 task_id: task026
 type: plan
-status: ready_for_implementation
+status: ready_for_review
 from: planner
 to: coder
 revision: 0
@@ -12,9 +12,10 @@ requires_review: true
 
 ## Status
 
-Ready for implementation under the active user goal to deliver a native
-Windows Remote Client. Task025 remains awaiting independent review; advancing
-this narrow execution slice does not fabricate an approval or accept Proposed
+Implementation and bounded native verification are complete; the task is ready
+for independent review under the active user goal to deliver a native Windows
+Remote Client. Task025 remains awaiting independent review, and neither this
+handoff nor its CI evidence fabricates an approval or accepts Proposed
 ADR-0007.
 
 ## Owner
