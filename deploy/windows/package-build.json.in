@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "product": "AISummoner Windows Remote",
+  "version": "@PRODUCT_VERSION@",
+  "channel": "engineering",
+  "source_commit": "@SOURCE_COMMIT@",
+  "platform": "windows",
+  "arch": "amd64",
+  "go_version": "@GO_VERSION@",
+  "qt_version": "@QT_VERSION@",
+  "default_server_origin": "@DEFAULT_SERVER_ORIGIN@",
+  "signed": false,
+  "gui_sha256": "@GUI_SHA256@",
+  "core_sha256": "@CORE_SHA256@"
+}

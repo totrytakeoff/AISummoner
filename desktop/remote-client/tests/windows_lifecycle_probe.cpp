@@ -14,8 +14,8 @@
 #include <QThread>
 
 #define NOMINMAX
-#include <tlhelp32.h>
 #include <windows.h>
+#include <tlhelp32.h>
 
 using namespace aisummoner;
 

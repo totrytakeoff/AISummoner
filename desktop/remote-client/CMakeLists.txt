@@ -47,6 +47,7 @@ target_compile_options(aisummoner_remote_ui PRIVATE
 if(WIN32)
     qt_add_executable(aisummoner-client-ui WIN32
         src/main.cpp
+        resources/aisummoner-client-ui.ico
         resources/aisummoner-client-ui.rc
     )
 else()
@@ -91,6 +92,13 @@ if(BUILD_TESTING)
                  COMMAND aisummoner_windows_lifecycle_probe)
         set_tests_properties(aisummoner_windows_lifecycle_probe PROPERTIES
             TIMEOUT 45
+        )
+
+        qt_add_executable(aisummoner_windows_package_probe
+            tests/windows_package_probe.cpp
+        )
+        target_link_libraries(aisummoner_windows_package_probe PRIVATE
+            aisummoner_remote_ui
         )
     endif()
 endif()

@@ -11,6 +11,9 @@ on:
       - "cmd/windows-contract-probe/**"
       - "desktop/remote-client/**"
       - "deploy/windows-spike/**"
+      - "deploy/windows/**"
+      - "LICENSE"
+      - "THIRD_PARTY_NOTICES.md"
       - "internal/clientipc/**"
       - "internal/clientplatform/**"
       - "internal/identity/**"
@@ -133,7 +136,7 @@ jobs:
             $server.WaitForExit()
           }
 
-      - name: Assemble unsigned contract bundle
+      - name: Assemble unsigned engineering package
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -152,25 +155,75 @@ jobs:
             }
           }
           if (-not $env:VCINSTALLDIR) { throw "vcvars64 did not set VCINSTALLDIR" }
-          $stage = "dist/AISummoner-Windows-Remote-Engineering"
-          New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          Copy-Item build/windows-remote/Release/aisummoner-client-ui.exe $stage
-          Copy-Item dist/windows-core/aisummoner-client.exe $stage
-          Copy-Item build/windows-remote/Release/aisummoner_windows_ipc_probe.exe $stage
-          Copy-Item dist/windows-contract/windows-contract-probe.exe $stage
-          Copy-Item dist/windows-contract/runner-facts.json $stage
-          Copy-Item deploy/windows-spike/README.txt $stage
-          windeployqt --release --compiler-runtime --dir $stage `
-            "$stage/aisummoner-client-ui.exe"
-          $redistributable = Join-Path $stage "vc_redist.x64.exe"
-          if (-not (Test-Path $redistributable)) {
-            throw "windeployqt omitted the official Visual C++ Redistributable"
-          }
           $archive = "dist/AISummoner-Windows-Remote-Engineering-x86_64.zip"
-          Compress-Archive -Path "$stage/*" -DestinationPath $archive -Force
-          (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant() + `
-            "  " + (Split-Path -Leaf $archive) |
-            Out-File -Encoding ascii "$archive.sha256"
+          $mt = (Get-Command mt.exe -ErrorAction Stop).Source
+          $dumpbin = (Get-Command dumpbin.exe -ErrorAction Stop).Source
+          $signtool = (Get-Command signtool.exe -ErrorAction Stop).Source
+          $windeployqt = (Get-Command windeployqt.exe -ErrorAction Stop).Source
+          cmake `
+            "-DROOT_DIR=$pwd" `
+            "-DGUI_EXECUTABLE=$pwd/build/windows-remote/Release/aisummoner-client-ui.exe" `
+            "-DCORE_EXECUTABLE=$pwd/dist/windows-core/aisummoner-client.exe" `
+            "-DMT_EXECUTABLE=$mt" `
+            "-DDUMPBIN_EXECUTABLE=$dumpbin" `
+            "-DSIGNTOOL_EXECUTABLE=$signtool" `
+            "-DWINDEPLOYQT_EXECUTABLE=$windeployqt" `
+            "-DDIST_DIR=$pwd/dist" `
+            "-DARCHIVE_PATH=$pwd/$archive" `
+            "-DSOURCE_COMMIT=$env:GITHUB_SHA" `
+            "-DPRODUCT_VERSION=0.1.0" `
+            "-DGO_VERSION=$(go env GOVERSION)" `
+            "-DQT_VERSION=6.8.3" `
+            "-DDEFAULT_SERVER_ORIGIN=https://122.51.70.33:10001" `
+            -P deploy/windows/package.cmake
+
+      - name: Prove staged ordinary-user GUI and Core lifecycle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          $accountName = "aisum$env:GITHUB_RUN_ID$env:GITHUB_RUN_ATTEMPT"
+          if ($accountName.Length -gt 20) { $accountName = $accountName.Substring(0, 20) }
+          $passwordBytes = New-Object byte[] 24
+          [Security.Cryptography.RandomNumberGenerator]::Fill($passwordBytes)
+          $passwordText = [Convert]::ToBase64String($passwordBytes) + "aA1!"
+          $securePassword = ConvertTo-SecureString $passwordText -AsPlainText -Force
+          $credential = [pscredential]::new("$env:COMPUTERNAME\$accountName", $securePassword)
+          $publicStage = Join-Path $env:PUBLIC "AISummoner-Task028-$env:GITHUB_RUN_ID"
+          $profilePath = Join-Path "C:\Users" $accountName
+          try {
+            New-LocalUser -Name $accountName -Password $securePassword `
+              -AccountNeverExpires -PasswordNeverExpires | Out-Null
+            Copy-Item -Recurse -Force dist/AISummoner-Windows-Remote $publicStage
+            Copy-Item build/windows-remote/Release/aisummoner_windows_package_probe.exe $publicStage
+            $probePath = Join-Path $publicStage "aisummoner_windows_package_probe.exe"
+            $process = Start-Process -FilePath $probePath `
+              -ArgumentList @("--stage", $publicStage) `
+              -Credential $credential -LoadUserProfile -PassThru -Wait
+            if ($process.ExitCode -ne 0) {
+              throw "ordinary-user package probe failed with $($process.ExitCode)"
+            }
+            $proofPath = Join-Path $profilePath `
+              "AppData\Local\AISummoner\Task028\package-proof.json"
+            $proof = Get-Content -Raw $proofPath | ConvertFrom-Json
+            if ($proof.elevated -or $proof.integrity_rid -ge 12288 `
+                -or -not $proof.ipc_same_logon -or -not $proof.core_survived_gui_close `
+                -or $proof.gui_exit_code -ne 0) {
+              throw "ordinary-user package proof did not satisfy the desktop contract"
+            }
+            Copy-Item $proofPath dist/windows-contract/ordinary-user-package-proof.json
+          } finally {
+            Get-Process "aisummoner-client*" -ErrorAction SilentlyContinue |
+              Where-Object { $_.Path -and $_.Path.StartsWith($publicStage) } |
+              Stop-Process -Force -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $publicStage
+            Remove-LocalUser -Name $accountName -ErrorAction SilentlyContinue
+            $profile = Get-CimInstance Win32_UserProfile -ErrorAction SilentlyContinue |
+              Where-Object { $_.LocalPath -eq $profilePath }
+            if ($profile) { $profile | Remove-CimInstance }
+            [Array]::Clear($passwordBytes, 0, $passwordBytes.Length)
+            $passwordText = $null
+          }
 
       - name: Upload unsigned engineering artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -179,6 +232,8 @@ jobs:
           path: |
             dist/AISummoner-Windows-Remote-Engineering-x86_64.zip
             dist/AISummoner-Windows-Remote-Engineering-x86_64.zip.sha256
+            dist/windows-contract/runner-facts.json
+            dist/windows-contract/ordinary-user-package-proof.json
           if-no-files-found: error
           retention-days: 14
 

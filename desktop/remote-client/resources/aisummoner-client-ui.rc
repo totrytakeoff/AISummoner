@@ -1,1 +1,39 @@
+#include <windows.h>
+
+#define AISUMMONER_APP_ICON 101
+
+AISUMMONER_APP_ICON ICON "aisummoner-client-ui.ico"
 1 RT_MANIFEST "aisummoner-client-ui.manifest"
+
+1 VERSIONINFO
+ FILEVERSION 0,1,0,0
+ PRODUCTVERSION 0,1,0,0
+ FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+#ifdef _DEBUG
+ FILEFLAGS VS_FF_DEBUG
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "080404B0"
+    BEGIN
+      VALUE "CompanyName", "AISummoner contributors\0"
+      VALUE "FileDescription", "AISummoner Remote Client\0"
+      VALUE "FileVersion", "0.1.0\0"
+      VALUE "InternalName", "aisummoner-client-ui\0"
+      VALUE "LegalCopyright", "Copyright (c) 2026 AISummoner contributors\0"
+      VALUE "OriginalFilename", "aisummoner-client-ui.exe\0"
+      VALUE "ProductName", "AISummoner Remote\0"
+      VALUE "ProductVersion", "0.1.0\0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0804, 1200
+  END
+END
