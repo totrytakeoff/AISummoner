@@ -274,8 +274,9 @@ bool currentTokenFacts(bool *elevated, quint32 *integrityRid, quint32 *sessionId
 
 bool writeProof(const QJsonObject &proof)
 {
-    const QString directory = QDir(QStandardPaths::writableLocation(
-        QStandardPaths::GenericDataLocation)).filePath(QStringLiteral("AISummoner/Task028"));
+    const QString localData = currentUserLocalDataDirectory();
+    if (localData.isEmpty()) return false;
+    const QString directory = QDir(localData).filePath(QStringLiteral("AISummoner/Task028"));
     if (!QDir().mkpath(directory)) return false;
     QSaveFile output(QDir(directory).filePath(QStringLiteral("package-proof.json")));
     return output.open(QIODevice::WriteOnly)

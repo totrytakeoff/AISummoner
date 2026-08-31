@@ -1,7 +1,7 @@
 #include "appsettings.h"
+#include "platformsecurity.h"
 
 #include <QDir>
-#include <QStandardPaths>
 
 namespace aisummoner {
 
@@ -43,7 +43,8 @@ QString AppSettings::fileName() const
 QString AppSettings::defaultDataDirectory()
 {
 #ifdef Q_OS_WIN
-    const QString localData = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+    const QString localData = currentUserLocalDataDirectory();
+    if (localData.isEmpty()) return {};
     return QDir::cleanPath(QDir(localData).filePath(QStringLiteral("AISummoner/RemoteClient")));
 #else
     // Keep the GUI and the Go CLI on the same fixed default even when a custom

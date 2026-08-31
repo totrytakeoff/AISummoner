@@ -36,6 +36,9 @@ target_link_libraries(aisummoner_remote_ui PUBLIC
     Qt6::Widgets
     Qt6::Network
 )
+if(WIN32)
+    target_link_libraries(aisummoner_remote_ui PRIVATE Ole32 Shell32 Userenv)
+endif()
 target_compile_definitions(aisummoner_remote_ui PUBLIC
     AISUMMONER_GUI_VERSION="${PROJECT_VERSION}"
     AISUMMONER_DEFAULT_SERVER_ORIGIN="${AISUMMONER_DEFAULT_SERVER_ORIGIN}"

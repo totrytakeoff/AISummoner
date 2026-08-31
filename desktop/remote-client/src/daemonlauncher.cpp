@@ -1,4 +1,5 @@
 #include "daemonlauncher.h"
+#include "platformsecurity.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -165,7 +166,7 @@ std::optional<LaunchSpec> DaemonLauncher::buildLaunchSpec(const QString &applica
         if (error) *error = QStringLiteral("本机数据目录无效");
         return std::nullopt;
     }
-    const QString homeDirectory = QDir::cleanPath(QDir::homePath());
+    const QString homeDirectory = currentUserProfileDirectory();
     if (!QDir::isAbsolutePath(homeDirectory)) {
         if (error) *error = QStringLiteral("本机用户目录无效");
         return std::nullopt;

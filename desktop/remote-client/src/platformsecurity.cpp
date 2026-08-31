@@ -1,11 +1,18 @@
 #include "platformsecurity.h"
 
+#include <QDir>
+#include <QStandardPaths>
+
 #ifdef Q_OS_WIN
 
 #define NOMINMAX
 #include <windows.h>
+#include <shlobj.h>
+#include <userenv.h>
 
 #include <QByteArray>
+
+#include <string>
 
 namespace {
 
@@ -32,6 +39,42 @@ bool isServiceAccount(PSID userSid)
         if (EqualSid(userSid, storage)) return true;
     }
     return false;
+}
+
+QString cleanAbsolutePath(const QString &path)
+{
+    if (path.isEmpty() || !QDir::isAbsolutePath(path)) return {};
+    return QDir::cleanPath(path);
+}
+
+QString tokenProfileDirectory(HANDLE token)
+{
+    DWORD length = 0;
+    GetUserProfileDirectoryW(token, nullptr, &length);
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || length == 0) return {};
+    std::wstring storage(length, L'\0');
+    if (!GetUserProfileDirectoryW(token, storage.data(), &length)) return {};
+    return cleanAbsolutePath(QString::fromWCharArray(storage.c_str()));
+}
+
+QString tokenKnownFolder(HANDLE token, REFKNOWNFOLDERID identifier)
+{
+    PWSTR rawPath = nullptr;
+    const HRESULT result = SHGetKnownFolderPath(identifier, KF_FLAG_DEFAULT, token, &rawPath);
+    if (FAILED(result) || !rawPath) return {};
+    const QString path = cleanAbsolutePath(QString::fromWCharArray(rawPath));
+    CoTaskMemFree(rawPath);
+    return path;
+}
+
+template<typename Resolver>
+QString currentTokenPath(Resolver resolver)
+{
+    HANDLE token = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return {};
+    const QString path = resolver(token);
+    CloseHandle(token);
+    return path;
 }
 
 } // namespace
@@ -103,6 +146,30 @@ QString privilegeViolation()
         return QStringLiteral("出于安全考虑，被控客户端不能以 root 身份运行。");
     }
     return {};
+#endif
+}
+
+QString currentUserProfileDirectory()
+{
+#ifdef Q_OS_WIN
+    return currentTokenPath([](HANDLE token) { return tokenProfileDirectory(token); });
+#else
+    return QDir::cleanPath(QDir::homePath());
+#endif
+}
+
+QString currentUserLocalDataDirectory()
+{
+#ifdef Q_OS_WIN
+    return currentTokenPath([](HANDLE token) {
+        const QString knownFolder = tokenKnownFolder(token, FOLDERID_LocalAppData);
+        if (!knownFolder.isEmpty()) return knownFolder;
+        const QString profile = tokenProfileDirectory(token);
+        if (profile.isEmpty()) return QString{};
+        return QDir::cleanPath(QDir(profile).filePath(QStringLiteral("AppData/Local")));
+    });
+#else
+    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
 #endif
 }
 

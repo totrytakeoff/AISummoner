@@ -22,7 +22,6 @@
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QStackedWidget>
-#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -393,7 +392,7 @@ void RemoteClientUiTest::launcherUsesOnlySafeSiblingAndExactArguments()
         QStringLiteral("https://control.example:10001"), QStringLiteral("test-device"), &error);
     QVERIFY2(spec.has_value(), qPrintable(error));
     QCOMPARE(spec->program, QFileInfo(daemon).canonicalFilePath());
-    QCOMPARE(spec->workingDirectory, QDir::homePath());
+    QCOMPARE(spec->workingDirectory, currentUserProfileDirectory());
     QVERIFY(spec->workingDirectory != QFileInfo(daemon).canonicalPath());
     QCOMPARE(spec->arguments, QStringList({QStringLiteral("daemon"), QStringLiteral("--server"),
         QStringLiteral("https://control.example:10001"), QStringLiteral("--data-dir"), data,
@@ -458,9 +457,21 @@ void RemoteClientUiTest::settingsPersistOnlyAllowlistedValues()
 {
 #ifdef Q_OS_WIN
     QCOMPARE(AppSettings::defaultDataDirectory(),
-             QDir::cleanPath(QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation))
+             QDir::cleanPath(QDir(currentUserLocalDataDirectory())
                                  .filePath(QStringLiteral("AISummoner/RemoteClient"))));
     QCOMPARE(AppSettings::defaultSocketPath(), QStringLiteral("LOCAL\\AISummoner.Remote.v1"));
+
+    const QString tokenLocalData = currentUserLocalDataDirectory();
+    const bool hadLocalAppData = qEnvironmentVariableIsSet("LOCALAPPDATA");
+    const bool hadUserProfile = qEnvironmentVariableIsSet("USERPROFILE");
+    const QByteArray oldLocalAppData = qgetenv("LOCALAPPDATA");
+    const QByteArray oldUserProfile = qgetenv("USERPROFILE");
+    qputenv("LOCALAPPDATA", QByteArrayLiteral("C:\\Users\\wrong-user\\AppData\\Local"));
+    qputenv("USERPROFILE", QByteArrayLiteral("C:\\Users\\wrong-user"));
+    const QString poisonedResult = currentUserLocalDataDirectory();
+    hadLocalAppData ? qputenv("LOCALAPPDATA", oldLocalAppData) : qunsetenv("LOCALAPPDATA");
+    hadUserProfile ? qputenv("USERPROFILE", oldUserProfile) : qunsetenv("USERPROFILE");
+    QCOMPARE(poisonedResult, tokenLocalData);
 #else
     QCOMPARE(AppSettings::defaultDataDirectory(),
              QDir(QDir::homePath()).filePath(QStringLiteral(".local/share/aisummoner")));

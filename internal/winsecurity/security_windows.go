@@ -29,9 +29,27 @@ type TokenFacts struct {
 // LocalDataDirectory resolves a stable application directory through the
 // Windows Known Folder API rather than cwd or an environment-only fallback.
 func LocalDataDirectory(parts ...string) (string, error) {
-	root, err := windows.KnownFolderPath(windows.FOLDERID_LocalAppData, windows.KF_FLAG_DEFAULT)
+	token, err := windows.OpenCurrentProcessToken()
 	if err != nil {
-		return "", fmt.Errorf("resolve LocalAppData: %w", err)
+		return "", fmt.Errorf("open process token for LocalAppData: %w", err)
+	}
+	defer token.Close()
+
+	root, knownFolderErr := token.KnownFolderPath(
+		windows.FOLDERID_LocalAppData, windows.KF_FLAG_DEFAULT,
+	)
+	if knownFolderErr != nil {
+		// CreateProcessWithLogonW can supply an inherited environment block even
+		// when the alternate user's profile is loaded. Some Shell configurations
+		// then reject the implicit/current-user Known Folder lookup. Resolve the
+		// profile from the explicit process token so neither LOCALAPPDATA nor
+		// USERPROFILE can redirect private Device Identity storage.
+		profile, profileErr := token.GetUserProfileDirectory()
+		if profileErr != nil {
+			return "", fmt.Errorf("resolve LocalAppData from current token (known folder: %v; profile: %w)",
+				knownFolderErr, profileErr)
+		}
+		root = filepath.Join(profile, "AppData", "Local")
 	}
 	if root == "" || !filepath.IsAbs(root) {
 		return "", errors.New("LocalAppData is not an absolute path")

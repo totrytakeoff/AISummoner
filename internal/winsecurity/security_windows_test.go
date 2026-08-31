@@ -78,6 +78,22 @@ func TestCurrentTokenKnownFolderAndProtectedPathContracts(t *testing.T) {
 	}
 }
 
+func TestLocalDataDirectoryIgnoresInheritedProfileEnvironment(t *testing.T) {
+	expected, err := LocalDataDirectory("AISummoner", "RemoteClient")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LOCALAPPDATA", `C:\Users\wrong-user\AppData\Local`)
+	t.Setenv("USERPROFILE", `C:\Users\wrong-user`)
+	actual, err := LocalDataDirectory("AISummoner", "RemoteClient")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actual != expected {
+		t.Fatalf("token LocalAppData changed through inherited environment: %q -> %q", expected, actual)
+	}
+}
+
 func TestDPAPICurrentUserRoundTripAndCorruption(t *testing.T) {
 	plaintext := []byte("AISummoner Windows DPAPI 中文")
 	entropy := []byte("AISummoner.Test.v1")
