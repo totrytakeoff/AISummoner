@@ -11,6 +11,7 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/aisummoner/aisummoner/internal/winprocess"
 	"golang.org/x/sys/windows"
