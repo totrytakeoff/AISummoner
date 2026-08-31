@@ -165,16 +165,12 @@ jobs:
           }
           if (-not $env:VCINSTALLDIR) { throw "vcvars64 did not set VCINSTALLDIR" }
 
-          $coreResourceDirectory = Join-Path $pwd "cmd/aisummoner-client"
-          $coreResourceRes = Join-Path $env:RUNNER_TEMP "aisummoner-client-resource.res"
-          $coreResourceSyso = Join-Path $coreResourceDirectory "resource_windows_amd64.syso"
-          Push-Location $coreResourceDirectory
-          try {
-            & rc.exe /nologo /fo $coreResourceRes aisummoner-client.rc
-            & cvtres.exe /nologo /machine:x64 "/out:$coreResourceSyso" $coreResourceRes
-          } finally {
-            Pop-Location
-          }
+          $coreResourceSyso = Join-Path $pwd `
+            "cmd/aisummoner-client/resource_windows_amd64.syso"
+          go run github.com/akavel/rsrc@v0.10.2 `
+            -arch amd64 `
+            -manifest cmd/aisummoner-client/aisummoner-client.manifest `
+            -o $coreResourceSyso
           go build -buildvcs=false -trimpath `
             -o dist/windows-core/aisummoner-client.exe ./cmd/aisummoner-client
 
