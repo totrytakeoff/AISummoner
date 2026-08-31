@@ -2048,6 +2048,9 @@ func TestRunRequestHistoryIsOwnerScopedBoundedAndExcludesReasoning(t *testing.T)
 	if last.Role != "user" || last.Content != "current request" || request.UserText != "current request" {
 		t.Fatalf("history/current request mismatch: last=%#v text=%q", last, request.UserText)
 	}
+	if request.Target.Platform != "linux" || request.Target.Arch != "amd64" {
+		t.Fatalf("adapter target metadata = %#v", request.Target)
+	}
 	waitSnapshot(t, fixture.service, fixture.ownerID, session.ID, store.AgentSessionIdle)
 }
 

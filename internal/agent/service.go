@@ -613,6 +613,10 @@ func (s *Service) StartTurn(ctx context.Context, ownerUserID, sessionID, content
 	if !ok {
 		return store.AgentMessage{}, &AdapterError{Code: "provider_unavailable", Err: errors.New("agent provider is unavailable")}
 	}
+	device, err := s.store.DeviceByOwner(ctx, ownerUserID, session.DeviceID)
+	if err != nil {
+		return store.AgentMessage{}, mapStoreNotFound(err)
+	}
 	turnCtx, cancel := context.WithTimeout(s.rootCtx, s.turnTimeout)
 	if err := s.reserveTurn(session, ownerUserID, cancel); err != nil {
 		cancel()
@@ -644,7 +648,8 @@ func (s *Service) StartTurn(ctx context.Context, ownerUserID, sessionID, content
 			externalSessionID = preparedID
 		}
 	}
-	request := RunRequest{SessionID: session.ID, ExternalSessionID: externalSessionID, UserText: content}
+	request := RunRequest{SessionID: session.ID, ExternalSessionID: externalSessionID, UserText: content,
+		Target: ExecutionTarget{Platform: device.Platform, Arch: device.Arch}}
 	if preflight, supportsPreflight := adapter.(TurnPreflighter); supportsPreflight {
 		if err := preflight.PreflightTurn(ctx, request); err != nil {
 			return store.AgentMessage{}, err
@@ -748,9 +753,17 @@ func (s *Service) runTurn(ctx context.Context, cancel context.CancelFunc, sessio
 		}
 		return
 	}
+	device, deviceErr := s.store.DeviceByOwner(ctx, session.UserID, session.DeviceID)
+	if deviceErr != nil {
+		if !s.isRevoked(session.ID) {
+			s.failTurn(session, "DEVICE_NOT_FOUND")
+		}
+		return
+	}
 	err := adapter.Run(ctx, RunRequest{
 		SessionID: session.ID, ExternalSessionID: externalSessionID,
 		UserText: message.Content, History: conversationHistory(snapshot.Messages), RemoteExec: invoker,
+		Target: ExecutionTarget{Platform: device.Platform, Arch: device.Arch},
 	}, sink)
 	if err == nil {
 		err = ctx.Err()

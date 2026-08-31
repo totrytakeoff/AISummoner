@@ -111,6 +111,17 @@ type RunRequest struct {
 	UserText          string
 	History           []ConversationMessage
 	RemoteExec        RemoteExecInvoker
+	// Target is resolved from the owner-scoped Device immediately before the
+	// Turn. Adapters may use it to select a target-aware execution profile, but
+	// never to select or rewrite the Device itself.
+	Target ExecutionTarget
+}
+
+// ExecutionTarget is value-only metadata for provider adapters. Platform and
+// Arch originate from the authenticated, owner-scoped Device record.
+type ExecutionTarget struct {
+	Platform string
+	Arch     string
 }
 
 // CredentialStatus is the value-free provider credential projection shared by
