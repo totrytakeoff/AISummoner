@@ -2,12 +2,12 @@
   "workflow_id": "AISummoner-2026-08-12-001",
   "project": "AISummoner",
   "context_dir": "docs/agent_context",
-  "current_task": "task023",
-  "current_stage": "human_validation",
+  "current_task": "task024",
+  "current_stage": "coding",
   "status": "running",
   "iteration": 0,
-  "last_decision": "WINDOWS_SERVER_2022_CONTRACTS_PROVEN_VM_GATES_PENDING",
-  "next_agent": "human_reviewer",
+  "last_decision": "HUMAN_AUTHORIZED_TASK024_WITH_TASK023_VM_GATES_CARRIED",
+  "next_agent": "coder",
   "max_revisions_per_task": 3,
-  "updated_at": "2026-08-31T03:23:17+08:00"
+  "updated_at": "2026-08-31T15:00:00+08:00"
 }

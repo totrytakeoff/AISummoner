@@ -83,8 +83,10 @@ updated_by: planner
   Qt/MSVC and native packaging contracts. Ordinary-user Windows 11/10,
   wrong-logon, clean-VM and detached production-Core evidence remain; ADR-0007
   stays Proposed.
-- [ ] A8.1 task024-task025: extract common platform seams, keep Linux green,
-  then implement Windows per-user Core, identity and private IPC.
+- [ ] A8.1 task024 (in progress) / task025: extract common platform seams and
+  keep Linux green, then implement Windows per-user Core, identity and private
+  IPC. Task024 was explicitly authorized while Task023 desktop VM evidence is
+  carried as release debt; this does not accept ADR-0007.
 - [ ] A8.2 task026-task027: implement PowerShell exec/Job cleanup and ConPTY
   Terminal through the real WSS/yamux/strict-SSH chain.
 - [ ] A8.3 task028-task029: ship a clean-VM Qt engineering ZIP, add the trusted

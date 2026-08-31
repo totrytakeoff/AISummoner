@@ -8,6 +8,12 @@ updated_by: planner
 
 ## Current
 
+- [ ] task024 (in progress): extract build-tagged paths/privilege/lifecycle,
+  Identity storage, local IPC transport and SSH process backends; preserve all
+  Linux behavior and extend Tunnel hello to strict `linux|windows`. The user
+  explicitly authorized this reversible extraction while Task023's desktop VM
+  validation debt remains open; no Windows production backend is claimed.
+
 - [ ] task023 (in progress): Windows Server 2022 CI now proves the strict
   Qt↔Go named-pipe path, exact peer-token check, DPAPI/ACL, suspended Job,
   PowerShell/ConPTY runtime, Qt/MSVC build and unsigned contract bundle. The
@@ -75,8 +81,9 @@ updated_by: planner
 
 ## Next
 
-- [ ] Accept or revise Proposed ADR-0007 after Task023 evidence; only then write
-  the Task024 common-platform extraction plan.
+- [ ] Complete Task023's ordinary-user Windows 11/10, wrong-logon and clean-VM
+  evidence before accepting or revising Proposed ADR-0007. This validation now
+  runs alongside the user-authorized, non-enabling Task024 extraction.
 - [x] Publish the first Controller milestone to the public GitHub repository
   with a concise README, documentation index, quick-start/deployment guides,
   public roadmap, contribution guide and security policy.
