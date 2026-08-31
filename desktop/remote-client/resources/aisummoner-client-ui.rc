@@ -3,7 +3,6 @@
 #define AISUMMONER_APP_ICON 101
 
 AISUMMONER_APP_ICON ICON "aisummoner-client-ui.ico"
-1 RT_MANIFEST "aisummoner-client-ui.manifest"
 
 1 VERSIONINFO
  FILEVERSION 0,1,0,0

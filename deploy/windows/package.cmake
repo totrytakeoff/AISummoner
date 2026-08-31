@@ -22,11 +22,24 @@ foreach(path IN ITEMS "${GUI_EXECUTABLE}" "${CORE_EXECUTABLE}"
                       "${root}/LICENSE" "${root}/THIRD_PARTY_NOTICES.md"
                       "${root}/deploy/windows/README.txt"
                       "${root}/deploy/windows/QT_SOURCE_OFFER.txt"
+                      "${root}/desktop/remote-client/resources/aisummoner-client-ui.manifest"
                       "${root}/cmd/aisummoner-client/aisummoner-client.manifest")
     if(NOT EXISTS "${path}")
         message(FATAL_ERROR "required package source is missing: ${path}")
     endif()
 endforeach()
+
+execute_process(
+    COMMAND "${MT_EXECUTABLE}" -nologo
+            -manifest "${root}/desktop/remote-client/resources/aisummoner-client-ui.manifest"
+            "-outputresource:${GUI_EXECUTABLE}"
+    RESULT_VARIABLE gui_manifest_result
+    OUTPUT_VARIABLE gui_manifest_output
+    ERROR_VARIABLE gui_manifest_error
+)
+if(NOT gui_manifest_result EQUAL 0)
+    message(FATAL_ERROR "embedding GUI asInvoker manifest failed: ${gui_manifest_output}${gui_manifest_error}")
+endif()
 
 execute_process(
     COMMAND "${MT_EXECUTABLE}" -nologo

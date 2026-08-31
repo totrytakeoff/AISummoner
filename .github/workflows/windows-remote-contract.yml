@@ -277,7 +277,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends qt6-base-dev
+          sudo apt-get install -y --no-install-recommends libgl1-mesa-dev qt6-base-dev
 
       - name: Test Linux Qt Remote UI
         shell: bash
