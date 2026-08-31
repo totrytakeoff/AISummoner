@@ -1,7 +1,7 @@
 ---
 type: architecture_analysis
 status: draft
-updated_by: planner
+updated_by: coder
 review_required: true
 ---
 
@@ -22,10 +22,12 @@ The strongest reusable assets are the trust chain, owner-scoped persistence,
 Tunnel/SSH lifecycle, Terminal data plane, Qt Remote GUI and the source-aligned
 DSH presentation baseline. DSH now also exposes native redacted Provider
 configuration and current-Session model selection through optional common
-capabilities. Linux remains the only implemented Remote OS. Windows has now
-been audited as a platform boundary rather than a cross-compile: the reusable
-Core needs named-pipe/DPAPI/ConPTY/Job Object backends and Agent target-shell
-awareness. The primary product debt is the remaining one-Turn lifecycle,
+capabilities. Linux remains the only implemented Remote OS. Windows has been
+audited as a platform boundary rather than a cross-compile, and Task024 now
+separates common Core behavior from build-tagged Runtime policy, Identity
+storage, IPC transport and SSH execution backends. Windows still needs the
+named-pipe/DPAPI/PowerShell/ConPTY/Job Object implementations and Agent
+target-shell awareness. The primary product debt is the remaining one-Turn lifecycle,
 incomplete Runtime capabilities and the unproved Windows platform seam rather
 than Controller chrome.
 
@@ -144,8 +146,10 @@ not a separate Windows product fork.
    lifecycle capabilities and richer native actions remain incremental work;
    native Provider/model configuration is complete.
 4. Enrich OpenCode, then add Codex and Claude using the same contracts.
-5. Prove the Windows backend contracts, then port Core/IPC/exec/ConPTY/Qt and
-   add a trusted Agent Execution Profile without weakening Linux behavior.
+5. Prove the Windows backend contracts and extract the common platform seams.
+   **Windows Server 2022 contracts and the Task024 extraction are complete.**
+   Implement Core/IPC/exec/ConPTY/Qt next, then add a trusted Agent Execution
+   Profile without weakening Linux behavior.
 6. Add structured file/diff and Desktop capabilities only through separate ADRs.
 
 Old routes should redirect for at least one migration release. Existing Session

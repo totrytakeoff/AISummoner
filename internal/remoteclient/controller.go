@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aisummoner/aisummoner/internal/clientplatform"
 	"github.com/aisummoner/aisummoner/internal/identity"
 	"github.com/aisummoner/aisummoner/internal/protocol"
 	"github.com/aisummoner/aisummoner/internal/sshserver"
@@ -132,7 +133,7 @@ func New(options Options) (*Controller, error) {
 	controller := newController(deviceIdentity.DeviceID, options.DeviceName, options.ClientVersion, options.ServerURL, now)
 	client, err := tunnel.NewClient(tunnel.ClientOptions{
 		ServerURL: options.ServerURL, DevMode: options.Development, Identity: deviceIdentity,
-		DeviceName: options.DeviceName, Platform: "linux", Arch: runtime.GOARCH, ClientVersion: options.ClientVersion,
+		DeviceName: options.DeviceName, Platform: clientplatform.Current().Name(), Arch: runtime.GOARCH, ClientVersion: options.ClientVersion,
 		HTTPClient: options.HTTPClient, Logger: options.Logger,
 		OnPairing: controller.observePairing, OnState: controller.observeTunnelState,
 		OnStream: controller.observeStream,

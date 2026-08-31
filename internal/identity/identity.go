@@ -4,24 +4,21 @@ package identity
 import (
 	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/x509"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/aisummoner/aisummoner/internal/id"
 	"golang.org/x/crypto/ssh"
 )
 
-const (
-	PrivateKeyFilename = "device_ed25519"
-	MetadataFilename   = "device.json"
-	metadataVersion    = 1
+const metadataVersion = 1
+
+var (
+	errPrivateKeyNotFound = errors.New("device private key not found")
+	errMetadataNotFound   = errors.New("identity metadata not found")
 )
 
 type Identity struct {
@@ -37,8 +34,18 @@ type metadata struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// storage is the platform security boundary for Device Identity material.
+// Common code owns key generation and identity validation; a platform store
+// owns at-rest encoding, permissions/ACLs and persistence.
+type storage interface {
+	LoadPrivateKey() (ed25519.PrivateKey, error)
+	CreatePrivateKey(ed25519.PrivateKey) error
+	LoadMetadata() (*metadata, error)
+	WriteMetadata(*metadata) error
+}
+
 // LoadOrCreate loads a stable device identity, or atomically creates one. The
-// private key is PKCS#8 PEM and is never returned through serialization APIs.
+// private key is never returned through serialization APIs.
 func LoadOrCreate(directory string) (*Identity, error) {
 	return loadOrCreate(directory, rand.Reader, time.Now)
 }
@@ -47,82 +54,68 @@ func loadOrCreate(directory string, random io.Reader, now func() time.Time) (*Id
 	if directory == "" {
 		return nil, errors.New("identity directory is required")
 	}
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return nil, fmt.Errorf("create identity directory: %w", err)
-	}
-	if err := os.Chmod(directory, 0o700); err != nil {
-		return nil, fmt.Errorf("protect identity directory: %w", err)
-	}
-	keyPath := filepath.Join(directory, PrivateKeyFilename)
-	contents, err := os.ReadFile(keyPath)
-	if errors.Is(err, os.ErrNotExist) {
-		if _, metadataErr := os.Stat(filepath.Join(directory, MetadataFilename)); metadataErr == nil {
-			return nil, errors.New("identity metadata exists but private key is missing")
-		} else if !errors.Is(metadataErr, os.ErrNotExist) {
-			return nil, fmt.Errorf("inspect identity metadata: %w", metadataErr)
-		}
-		return create(directory, random, now().UTC())
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read device private key: %w", err)
-	}
-	if err := requirePrivateMode(keyPath); err != nil {
-		return nil, err
-	}
-	privateKey, err := parsePrivateKey(contents)
+	store, err := newStorage(directory)
 	if err != nil {
 		return nil, err
 	}
-	identity, err := fromPrivateKey(privateKey, time.Time{})
-	if err != nil {
-		return nil, err
-	}
-	metadataPath := filepath.Join(directory, MetadataFilename)
-	metadataContents, err := os.ReadFile(metadataPath)
-	if errors.Is(err, os.ErrNotExist) {
-		identity.CreatedAt = now().UTC()
-		if err := writeMetadata(metadataPath, identity); err != nil {
-			return nil, err
-		}
-		return identity, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read identity metadata: %w", err)
-	}
-	var stored metadata
-	if err := json.Unmarshal(metadataContents, &stored); err != nil {
-		return nil, fmt.Errorf("decode identity metadata: %w", err)
-	}
-	if stored.Version != metadataVersion || stored.DeviceID != identity.DeviceID || stored.CreatedAt.IsZero() {
-		return nil, errors.New("identity metadata does not match private key")
-	}
-	identity.CreatedAt = stored.CreatedAt.UTC()
-	return identity, nil
+	return loadOrCreateFromStorage(store, random, now)
 }
 
-func create(directory string, random io.Reader, createdAt time.Time) (*Identity, error) {
+func loadOrCreateFromStorage(store storage, random io.Reader, now func() time.Time) (*Identity, error) {
+	if store == nil {
+		return nil, errors.New("identity storage is required")
+	}
+	privateKey, err := store.LoadPrivateKey()
+	if errors.Is(err, errPrivateKeyNotFound) {
+		if _, metadataErr := store.LoadMetadata(); metadataErr == nil {
+			return nil, errors.New("identity metadata exists but private key is missing")
+		} else if !errors.Is(metadataErr, errMetadataNotFound) {
+			return nil, fmt.Errorf("inspect identity metadata: %w", metadataErr)
+		}
+		return create(store, random, now().UTC())
+	}
+	if err != nil {
+		return nil, err
+	}
+	deviceIdentity, err := fromPrivateKey(privateKey, time.Time{})
+	if err != nil {
+		return nil, err
+	}
+	stored, err := store.LoadMetadata()
+	if errors.Is(err, errMetadataNotFound) {
+		deviceIdentity.CreatedAt = now().UTC()
+		if err := store.WriteMetadata(metadataFromIdentity(deviceIdentity)); err != nil {
+			return nil, err
+		}
+		return deviceIdentity, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if stored.Version != metadataVersion || stored.DeviceID != deviceIdentity.DeviceID || stored.CreatedAt.IsZero() {
+		return nil, errors.New("identity metadata does not match private key")
+	}
+	deviceIdentity.CreatedAt = stored.CreatedAt.UTC()
+	return deviceIdentity, nil
+}
+
+func create(store storage, random io.Reader, createdAt time.Time) (*Identity, error) {
 	publicKey, privateKey, err := ed25519.GenerateKey(random)
 	if err != nil {
 		return nil, fmt.Errorf("generate device identity: %w", err)
 	}
-	identity, err := fromPrivateKey(privateKey, createdAt)
+	deviceIdentity, err := fromPrivateKey(privateKey, createdAt)
 	if err != nil {
 		return nil, err
 	}
-	identity.PublicKey = publicKey
-	encoded, err := x509.MarshalPKCS8PrivateKey(privateKey)
-	if err != nil {
-		return nil, fmt.Errorf("encode device private key: %w", err)
-	}
-	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: encoded})
-	keyPath := filepath.Join(directory, PrivateKeyFilename)
-	if err := writePrivateFile(keyPath, pemBytes); err != nil {
+	deviceIdentity.PublicKey = publicKey
+	if err := store.CreatePrivateKey(privateKey); err != nil {
 		return nil, err
 	}
-	if err := writeMetadata(filepath.Join(directory, MetadataFilename), identity); err != nil {
+	if err := store.WriteMetadata(metadataFromIdentity(deviceIdentity)); err != nil {
 		return nil, err
 	}
-	return identity, nil
+	return deviceIdentity, nil
 }
 
 func fromPrivateKey(privateKey ed25519.PrivateKey, createdAt time.Time) (*Identity, error) {
@@ -143,70 +136,27 @@ func fromPrivateKey(privateKey ed25519.PrivateKey, createdAt time.Time) (*Identi
 	}, nil
 }
 
-func parsePrivateKey(contents []byte) (ed25519.PrivateKey, error) {
-	block, rest := pem.Decode(contents)
-	if block == nil || block.Type != "PRIVATE KEY" || len(rest) != 0 {
-		return nil, errors.New("invalid device private key PEM")
+func metadataFromIdentity(deviceIdentity *Identity) *metadata {
+	return &metadata{
+		Version: metadataVersion, DeviceID: deviceIdentity.DeviceID,
+		CreatedAt: deviceIdentity.CreatedAt.UTC(),
 	}
-	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-	if err != nil {
-		return nil, fmt.Errorf("parse device private key: %w", err)
-	}
-	privateKey, ok := parsed.(ed25519.PrivateKey)
-	if !ok {
-		return nil, errors.New("device private key is not Ed25519")
-	}
-	return privateKey, nil
 }
 
-func writePrivateFile(path string, contents []byte) error {
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+func encodeMetadata(value *metadata) ([]byte, error) {
+	contents, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
-		return fmt.Errorf("create device private key: %w", err)
+		return nil, fmt.Errorf("encode identity metadata: %w", err)
 	}
-	if _, err := file.Write(contents); err != nil {
-		file.Close()
-		return fmt.Errorf("write device private key: %w", err)
-	}
-	if err := file.Sync(); err != nil {
-		file.Close()
-		return fmt.Errorf("sync device private key: %w", err)
-	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("close device private key: %w", err)
-	}
-	return nil
+	return append(contents, '\n'), nil
 }
 
-func writeMetadata(path string, identity *Identity) error {
-	contents, err := json.MarshalIndent(metadata{
-		Version: metadataVersion, DeviceID: identity.DeviceID, CreatedAt: identity.CreatedAt.UTC(),
-	}, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode identity metadata: %w", err)
+func decodeMetadata(contents []byte) (*metadata, error) {
+	var value metadata
+	if err := json.Unmarshal(contents, &value); err != nil {
+		return nil, fmt.Errorf("decode identity metadata: %w", err)
 	}
-	contents = append(contents, '\n')
-	if err := os.WriteFile(path, contents, 0o600); err != nil {
-		return fmt.Errorf("write identity metadata: %w", err)
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		return fmt.Errorf("protect identity metadata: %w", err)
-	}
-	return nil
-}
-
-func requirePrivateMode(path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("inspect device private key: %w", err)
-	}
-	if !info.Mode().IsRegular() {
-		return errors.New("device private key is not a regular file")
-	}
-	if info.Mode().Perm() != 0o600 {
-		return fmt.Errorf("device private key permissions are %04o, require 0600", info.Mode().Perm())
-	}
-	return nil
+	return &value, nil
 }
 
 // Sign signs a domain-separated authentication transcript.

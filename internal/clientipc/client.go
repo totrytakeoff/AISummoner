@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
-	"path/filepath"
 	"time"
 
 	"github.com/aisummoner/aisummoner/internal/id"
@@ -16,8 +14,9 @@ import (
 
 const defaultCallTimeout = 5 * time.Second
 
-func Call(ctx context.Context, socketPath, method string, params, result any) error {
-	if !filepath.IsAbs(socketPath) || len(socketPath) > 100 || !knownMethod(method) {
+func Call(ctx context.Context, endpoint, method string, params, result any) error {
+	transport := currentTransport()
+	if err := transport.ValidateEndpoint(endpoint); err != nil || !knownMethod(method) {
 		return errors.New("invalid local daemon request")
 	}
 	requestID, err := id.New("req")
@@ -38,8 +37,7 @@ func Call(ctx context.Context, socketPath, method string, params, result any) er
 		callContext, cancel = context.WithTimeout(ctx, defaultCallTimeout)
 		defer cancel()
 	}
-	dialer := net.Dialer{}
-	connection, err := dialer.DialContext(callContext, "unix", socketPath)
+	connection, err := transport.Dial(callContext, endpoint)
 	if err != nil {
 		return fmt.Errorf("connect to local Remote service: %w", err)
 	}

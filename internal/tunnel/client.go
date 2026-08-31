@@ -106,7 +106,7 @@ func NewClient(options ClientOptions) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(options.DeviceName) == 0 || len(options.DeviceName) > 128 || options.Platform != "linux" ||
+	if len(options.DeviceName) == 0 || len(options.DeviceName) > 128 || !protocol.SupportedPlatform(options.Platform) ||
 		len(options.Arch) == 0 || len(options.Arch) > 64 || len(options.ClientVersion) == 0 || len(options.ClientVersion) > 64 {
 		return nil, errors.New("invalid client metadata")
 	}

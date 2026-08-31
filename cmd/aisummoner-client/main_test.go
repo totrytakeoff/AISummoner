@@ -1,3 +1,5 @@
+//go:build linux
+
 package main
 
 import (
@@ -15,30 +17,6 @@ import (
 	"github.com/aisummoner/aisummoner/internal/clientipc"
 	"github.com/aisummoner/aisummoner/internal/remoteclient"
 )
-
-func TestValidateRootModeRequiresBothDevelopmentFlags(t *testing.T) {
-	tests := []struct {
-		name        string
-		effectiveID int
-		development bool
-		allowRoot   bool
-		wantError   bool
-	}{
-		{name: "ordinary user", effectiveID: 1000},
-		{name: "root default", effectiveID: 0, wantError: true},
-		{name: "root dev only", effectiveID: 0, development: true, wantError: true},
-		{name: "root allow only", effectiveID: 0, allowRoot: true, wantError: true},
-		{name: "root explicit development override", effectiveID: 0, development: true, allowRoot: true},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			err := validateRootMode(test.effectiveID, test.development, test.allowRoot)
-			if (err != nil) != test.wantError {
-				t.Fatalf("validateRootMode() error = %v, wantError=%v", err, test.wantError)
-			}
-		})
-	}
-}
 
 func TestParseLaunchOptionsKeepsLegacyStartAndPrivateDaemonSocket(t *testing.T) {
 	dataDirectory := t.TempDir()
@@ -132,7 +110,7 @@ func TestPrivateIPCObservesPausesAndResumesRealRemoteCore(t *testing.T) {
 	}
 	socketPath := filepath.Join(dataDirectory, "client.sock")
 	ipcServer, err := clientipc.NewServer(clientipc.ServerOptions{
-		SocketPath: socketPath, Controller: controller, Logger: logger,
+		Endpoint: socketPath, Controller: controller, Logger: logger,
 	})
 	if err != nil {
 		t.Fatal(err)

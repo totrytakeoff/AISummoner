@@ -61,6 +61,31 @@ func TestResolveTunnelURLRequiresExplicitDevModeAndLiteralLoopbackForPlaintext(t
 	}
 }
 
+func TestNewClientAcceptsOnlySupportedDevicePlatforms(t *testing.T) {
+	for _, platform := range []string{protocol.PlatformLinux, protocol.PlatformWindows} {
+		t.Run(platform, func(t *testing.T) {
+			_, err := NewClient(ClientOptions{
+				ServerURL: "https://example.test", Identity: testIdentity(t),
+				DeviceName: "platform-device", Platform: platform, Arch: "amd64", ClientVersion: "test",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	for _, platform := range []string{"", "darwin", "windows\x00linux"} {
+		t.Run("reject_"+platform, func(t *testing.T) {
+			_, err := NewClient(ClientOptions{
+				ServerURL: "https://example.test", Identity: testIdentity(t),
+				DeviceName: "platform-device", Platform: platform, Arch: "amd64", ClientVersion: "test",
+			})
+			if err == nil {
+				t.Fatalf("unsupported platform %q was accepted", platform)
+			}
+		})
+	}
+}
+
 func TestClientStateCallbacksReportRetryAndJoinedStop(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		http.Error(writer, "unavailable", http.StatusServiceUnavailable)

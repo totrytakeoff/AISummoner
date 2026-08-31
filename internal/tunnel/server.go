@@ -451,7 +451,7 @@ func expectMessage(codec *protocol.Codec, expectedType string) (protocol.Message
 
 func validateHello(hello protocol.ClientHello) (ed25519.PublicKey, error) {
 	if len(hello.DeviceID) > 128 || len(hello.DeviceName) == 0 || len(hello.DeviceName) > 128 ||
-		hello.Platform != "linux" || len(hello.Arch) == 0 || len(hello.Arch) > 64 ||
+		!protocol.SupportedPlatform(hello.Platform) || len(hello.Arch) == 0 || len(hello.Arch) > 64 ||
 		len(hello.ClientVersion) == 0 || len(hello.ClientVersion) > 64 {
 		return nil, errors.New("invalid client hello metadata")
 	}

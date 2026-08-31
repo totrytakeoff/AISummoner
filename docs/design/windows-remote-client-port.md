@@ -34,7 +34,24 @@ Go Remote Core（共同状态机、配对、Tunnel、事件、IPC dispatch）
 配对码；关闭 GUI 不断开后台连接；手动暂停会 joined 关闭 Tunnel 和全部子进程。用户不填
 Server 地址，默认地址继续在构建时写入，设置页只保留高级覆盖入口。
 
-## 当前代码审计
+## 实施进展（2026-08-31）
+
+Task023 已在 Windows Server 2022 CI 证明 named pipe/peer token、DPAPI/ACL、PowerShell/
+Job、ConPTY、Qt/MSVC 与工程打包合同。Task024 随后完成生产代码拆分：
+
+- `internal/clientplatform`：平台名、数据目录、权限与 shutdown；
+- `internal/identity`：共同 Ed25519 语义 + build-tagged storage；
+- `internal/clientipc`：共同 JSON dispatch + authenticated transport/listener；
+- `internal/sshserver`：共同 SSH Session 协议 + execution/session-process backend；
+- Tunnel hello：严格 `linux|windows` 枚举，协议版本仍为 1。
+
+Linux daemon、IPC、真实 SSH exec/PTY/进程树回收、Qt CTest 与 GUI+daemon AppImage 均已
+回归；AppImage 打包也固定为最多两个 mksquashfs worker。生产 Windows build 会明确停在
+尚未实现的 backend constructor，不再误入 Unix API，也没有用 no-op 假实现冒充支持。
+下一步是 Task025 的 Windows Runtime/DPAPI/named-pipe Core；Windows 仍未成为支持平台，
+ADR-0007 仍为 Proposed。
+
+## Task024 前代码审计
 
 Tunnel、配对和大部分 Qt 页面可以复用，但以下位置把 Linux 行为写进了生产路径：
 
@@ -94,10 +111,10 @@ internal/sshserver/
   pty_linux.go            conpty_windows.go
 ```
 
-现有 `sshserver/server.go` 中的 SSH 握手、channel/request 解析、输入上限、exit-status 和
+原 `sshserver/server.go` 中的 SSH 握手、channel/request 解析、输入上限、exit-status 和
 joined session 生命周期属于共同层；`/bin/sh`、PTY、signal、pidfd 和 `/proc` 扫描属于
-Linux backend。先完成这个拆分并保持 Linux 测试全绿，再启用 Windows hello，避免一次性
-重写已经验证的数据面。
+Linux backend。Task024 已按此顺序完成拆分并保持 Linux 数据面回归，再启用严格 Windows
+hello 枚举，没有一次性重写已经验证的数据面。
 
 ## Windows 运行与权限合同
 
@@ -338,6 +355,7 @@ detached 启动和 Windows CI toolchain。根据实测修订并接受/拒绝 ADR
 
 把 paths/privilege/identity/IPC/process 接口从 Linux 实现中抽出，使用 build tags，保持 Linux
 AppImage、daemon、Terminal 和 Agent 回归全绿；扩展 hello platform enum 和测试。
+**实现完成，等待独立 review；不代表 Windows backend 已完成。**
 
 ### Task025：Windows Core、Identity 与 IPC
 

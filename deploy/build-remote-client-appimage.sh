@@ -100,6 +100,7 @@ else
 fi
 
 ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "$appimagetool" --no-appstream \
+  --mksquashfs-opt=-processors --mksquashfs-opt=2 \
   --runtime-file "$runtime" "$work_dir/AppDir" "$output"
 chmod 0755 "$output"
 (CDPATH= cd -- "$output_dir" && sha256sum "$(basename -- "$output")") > "$output.sha256"

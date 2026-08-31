@@ -10,14 +10,10 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"os"
-	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/aisummoner/aisummoner/internal/remoteclient"
-	"golang.org/x/sys/unix"
 )
 
 const (
@@ -34,68 +30,43 @@ type Controller interface {
 }
 
 type ServerOptions struct {
-	SocketPath string
+	Endpoint   string
 	Controller Controller
 	Logger     *slog.Logger
 }
 
 type Server struct {
-	socketPath   string
-	controller   Controller
-	logger       *slog.Logger
-	effectiveUID uint32
-	peerUID      func(*net.UnixConn) (uint32, error)
-	timeout      time.Duration
-	maxHandlers  int
-}
-
-type socketIdentity struct {
-	device uint64
-	inode  uint64
+	endpoint         string
+	controller       Controller
+	logger           *slog.Logger
+	transport        localTransport
+	authenticatePeer func(net.Conn) error
+	timeout          time.Duration
+	maxHandlers      int
 }
 
 func NewServer(options ServerOptions) (*Server, error) {
 	if options.Controller == nil {
 		return nil, errors.New("Remote controller is required")
 	}
-	if !filepath.IsAbs(options.SocketPath) || len(options.SocketPath) > 100 {
-		return nil, errors.New("daemon socket path must be a bounded absolute path")
+	transport := currentTransport()
+	if err := transport.ValidateEndpoint(options.Endpoint); err != nil {
+		return nil, err
 	}
 	if options.Logger == nil {
 		options.Logger = slog.Default()
 	}
 	return &Server{
-		socketPath: options.SocketPath, controller: options.Controller, logger: options.Logger,
-		effectiveUID: uint32(os.Geteuid()), peerUID: unixPeerUID,
-		timeout: defaultHandlerTimeout, maxHandlers: MaxHandlers,
+		endpoint: options.Endpoint, controller: options.Controller, logger: options.Logger,
+		transport: transport, timeout: defaultHandlerTimeout, maxHandlers: MaxHandlers,
 	}, nil
 }
 
-func DefaultSocketPath(dataDirectory string) string {
-	return filepath.Join(dataDirectory, "client.sock")
-}
-
 func (server *Server) Serve(ctx context.Context) error {
-	if err := server.prepareParent(); err != nil {
-		return err
-	}
-	if err := server.removeStaleSocket(); err != nil {
-		return err
-	}
-	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: server.socketPath, Net: "unix"})
+	listener, err := server.transport.Listen(server.endpoint)
 	if err != nil {
-		return fmt.Errorf("listen on private client socket: %w", err)
-	}
-	if err := os.Chmod(server.socketPath, 0o600); err != nil {
-		listener.Close()
-		return fmt.Errorf("protect private client socket: %w", err)
-	}
-	identity, err := inspectSocket(server.socketPath, server.effectiveUID)
-	if err != nil {
-		listener.Close()
 		return err
 	}
-
 	closed := make(chan struct{})
 	go func() {
 		select {
@@ -106,13 +77,12 @@ func (server *Server) Serve(ctx context.Context) error {
 	}()
 	defer close(closed)
 	defer listener.Close()
-	defer server.removeExactSocket(identity)
 
 	semaphore := make(chan struct{}, server.maxHandlers)
 	var handlers sync.WaitGroup
 	defer handlers.Wait()
 	for {
-		connection, err := listener.AcceptUnix()
+		connection, err := listener.Accept()
 		if err != nil {
 			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
 				return nil
@@ -125,7 +95,7 @@ func (server *Server) Serve(ctx context.Context) error {
 			go func() {
 				defer handlers.Done()
 				defer func() { <-semaphore }()
-				server.handle(ctx, connection)
+				server.handle(ctx, listener, connection)
 			}()
 		default:
 			_ = connection.Close()
@@ -133,16 +103,19 @@ func (server *Server) Serve(ctx context.Context) error {
 	}
 }
 
-func (server *Server) handle(parent context.Context, connection *net.UnixConn) {
+func (server *Server) handle(parent context.Context, listener authenticatedListener, connection net.Conn) {
 	defer connection.Close()
 	// The controller operation itself remains bounded by server.timeout. Keep a
 	// small, still-bounded tail so a TIMEOUT envelope can be written after that
-	// context expires instead of racing the socket deadline at the same instant.
+	// context expires instead of racing the transport deadline at that instant.
 	if err := connection.SetDeadline(time.Now().Add(server.timeout + responseWriteGrace)); err != nil {
 		return
 	}
-	peerUID, err := server.peerUID(connection)
-	if err != nil || peerUID != server.effectiveUID {
+	authenticate := listener.Authenticate
+	if server.authenticatePeer != nil {
+		authenticate = server.authenticatePeer
+	}
+	if err := authenticate(connection); err != nil {
 		server.logger.Warn("rejected local client peer")
 		return
 	}
@@ -252,83 +225,6 @@ func (server *Server) writeResponse(connection net.Conn, response Response) {
 	}
 	encoded = append(encoded, '\n')
 	_, _ = connection.Write(encoded)
-}
-
-func (server *Server) prepareParent() error {
-	parent := filepath.Dir(server.socketPath)
-	info, err := os.Lstat(parent)
-	if err != nil {
-		return fmt.Errorf("inspect daemon socket directory: %w", err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || info.Mode().Perm() != 0o700 {
-		return errors.New("daemon socket directory must be a non-symlink mode-0700 directory")
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || stat.Uid != server.effectiveUID {
-		return errors.New("daemon socket directory must be owned by the daemon user")
-	}
-	return nil
-}
-
-func (server *Server) removeStaleSocket() error {
-	_, err := os.Lstat(server.socketPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("inspect daemon socket: %w", err)
-	}
-	if _, err := inspectSocket(server.socketPath, server.effectiveUID); err != nil {
-		return err
-	}
-	if err := os.Remove(server.socketPath); err != nil {
-		return fmt.Errorf("remove stale daemon socket: %w", err)
-	}
-	return nil
-}
-
-func (server *Server) removeExactSocket(identity socketIdentity) {
-	current, err := inspectSocket(server.socketPath, server.effectiveUID)
-	if err != nil || current != identity {
-		return
-	}
-	_ = os.Remove(server.socketPath)
-}
-
-func inspectSocket(path string, owner uint32) (socketIdentity, error) {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return socketIdentity{}, fmt.Errorf("inspect daemon socket: %w", err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 || info.Mode()&os.ModeSocket == 0 || info.Mode().Perm() != 0o600 {
-		return socketIdentity{}, errors.New("daemon socket path is not an owned mode-0600 socket")
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || stat.Uid != owner {
-		return socketIdentity{}, errors.New("daemon socket is not owned by the daemon user")
-	}
-	return socketIdentity{device: uint64(stat.Dev), inode: stat.Ino}, nil
-}
-
-func unixPeerUID(connection *net.UnixConn) (uint32, error) {
-	raw, err := connection.SyscallConn()
-	if err != nil {
-		return 0, err
-	}
-	var credential *unix.Ucred
-	var controlErr error
-	if err := raw.Control(func(fd uintptr) {
-		credential, controlErr = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
-	}); err != nil {
-		return 0, err
-	}
-	if controlErr != nil {
-		return 0, controlErr
-	}
-	if credential == nil {
-		return 0, errors.New("local peer credentials are unavailable")
-	}
-	return credential.Uid, nil
 }
 
 func readFrame(reader io.Reader) ([]byte, error) {

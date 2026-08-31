@@ -1,3 +1,5 @@
+//go:build linux
+
 package clientipc
 
 import (
@@ -70,7 +72,7 @@ func TestPrivateSocketRoundTripPermissionsAndCleanup(t *testing.T) {
 		snapshot: remoteclient.Snapshot{DeviceID: "dev_test", DeviceName: "remote", ClientVersion: "test", Phase: remoteclient.PhaseOnline},
 		events:   []remoteclient.Event{{Sequence: 2, Kind: "tunnel.online", Level: "info", Summary: "Connected to control service"}},
 	}
-	server, err := NewServer(ServerOptions{SocketPath: socketPath, Controller: stub, Logger: discardLogger()})
+	server, err := NewServer(ServerOptions{Endpoint: socketPath, Controller: stub, Logger: discardLogger()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,11 +137,11 @@ func TestServerRejectsWrongPeerBeforeReadingRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	socketPath := filepath.Join(directory, "client.sock")
-	server, err := NewServer(ServerOptions{SocketPath: socketPath, Controller: &controllerStub{}, Logger: discardLogger()})
+	server, err := NewServer(ServerOptions{Endpoint: socketPath, Controller: &controllerStub{}, Logger: discardLogger()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	server.peerUID = func(*net.UnixConn) (uint32, error) { return server.effectiveUID + 1, nil }
+	server.authenticatePeer = func(net.Conn) error { return errors.New("wrong local peer") }
 	cancel, stopped := runTestServer(t, server, socketPath)
 	defer func() { cancel(); <-stopped }()
 	var snapshot remoteclient.Snapshot
@@ -176,7 +178,7 @@ func TestServerRejectsUnsafeSocketPaths(t *testing.T) {
 			}
 			path := filepath.Join(directory, "client.sock")
 			test.setup(t, directory, path)
-			server, err := NewServer(ServerOptions{SocketPath: path, Controller: &controllerStub{}, Logger: discardLogger()})
+			server, err := NewServer(ServerOptions{Endpoint: path, Controller: &controllerStub{}, Logger: discardLogger()})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -193,7 +195,7 @@ func TestMalformedAndUnknownRequestsReturnFixedErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	socketPath := filepath.Join(directory, "client.sock")
-	server, err := NewServer(ServerOptions{SocketPath: socketPath, Controller: &controllerStub{}, Logger: discardLogger()})
+	server, err := NewServer(ServerOptions{Endpoint: socketPath, Controller: &controllerStub{}, Logger: discardLogger()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +229,7 @@ func TestOversizedRequestAndControllerDeadlineStayBounded(t *testing.T) {
 	socketPath := filepath.Join(directory, "client.sock")
 	release := make(chan struct{})
 	stub := &controllerStub{pauseEntered: make(chan struct{}, 1), pauseRelease: release}
-	server, err := NewServer(ServerOptions{SocketPath: socketPath, Controller: stub, Logger: discardLogger()})
+	server, err := NewServer(ServerOptions{Endpoint: socketPath, Controller: stub, Logger: discardLogger()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +277,7 @@ func TestServerBoundsConcurrentHandlers(t *testing.T) {
 	socketPath := filepath.Join(directory, "client.sock")
 	release := make(chan struct{})
 	stub := &controllerStub{pauseEntered: make(chan struct{}, MaxHandlers), pauseRelease: release}
-	server, err := NewServer(ServerOptions{SocketPath: socketPath, Controller: stub, Logger: discardLogger()})
+	server, err := NewServer(ServerOptions{Endpoint: socketPath, Controller: stub, Logger: discardLogger()})
 	if err != nil {
 		t.Fatal(err)
 	}

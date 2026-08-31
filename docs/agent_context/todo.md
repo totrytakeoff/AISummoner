@@ -1,18 +1,18 @@
 ---
 type: todo
 status: active
-updated_by: planner
+updated_by: coder
 ---
 
 # Todo
 
 ## Current
 
-- [ ] task024 (in progress): extract build-tagged paths/privilege/lifecycle,
-  Identity storage, local IPC transport and SSH process backends; preserve all
-  Linux behavior and extend Tunnel hello to strict `linux|windows`. The user
-  explicitly authorized this reversible extraction while Task023's desktop VM
-  validation debt remains open; no Windows production backend is claimed.
+- [x] task024 (ready for review): extracted build-tagged
+  paths/privilege/lifecycle, Identity storage, local IPC transport and SSH
+  process backends; Linux daemon/SSH/Qt/AppImage regressions pass and Tunnel
+  hello is the strict `linux|windows` enum. Windows constructors remain absent
+  for Tasks025-027, and Proposed ADR-0007 is not accepted by this checkpoint.
 
 - [ ] task023 (in progress): Windows Server 2022 CI now proves the strict
   Qt↔Go named-pipe path, exact peer-token check, DPAPI/ACL, suspended Job,
@@ -81,6 +81,10 @@ updated_by: planner
 
 ## Next
 
+- [ ] task025: implement the real Windows per-user Runtime, LocalAppData/token
+  gate, DPAPI Identity and authenticated named-pipe IPC against Task024's
+  seams. A fail-closed unsupported SSH execution backend may keep pairing/
+  status usable until Task026, but it must never report Terminal success.
 - [ ] Complete Task023's ordinary-user Windows 11/10, wrong-logon and clean-VM
   evidence before accepting or revising Proposed ADR-0007. This validation now
   runs alongside the user-authorized, non-enabling Task024 extraction.

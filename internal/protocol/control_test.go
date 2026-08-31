@@ -78,3 +78,16 @@ func TestWriteRejectsOversizedPayload(t *testing.T) {
 		t.Fatalf("error = %v, want ErrFrameTooLarge", err)
 	}
 }
+
+func TestSupportedPlatformIsClosedToLinuxAndWindows(t *testing.T) {
+	for _, value := range []string{PlatformLinux, PlatformWindows} {
+		if !SupportedPlatform(value) {
+			t.Fatalf("supported platform %q was rejected", value)
+		}
+	}
+	for _, value := range []string{"", "darwin", "windows\x00linux", "Windows"} {
+		if SupportedPlatform(value) {
+			t.Fatalf("unsupported platform %q was accepted", value)
+		}
+	}
+}

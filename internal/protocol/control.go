@@ -21,6 +21,9 @@ const (
 	StreamControl = "control"
 	StreamSSH     = "ssh"
 
+	PlatformLinux   = "linux"
+	PlatformWindows = "windows"
+
 	TypeClientHello         = "client.hello"
 	TypeServerChallenge     = "server.challenge"
 	TypeDeviceProof         = "device.proof"
@@ -29,6 +32,12 @@ const (
 	TypeDeviceHeartbeat     = "device.heartbeat"
 	TypeHeartbeatAck        = "server.heartbeat_ack"
 )
+
+// SupportedPlatform reports whether value is recognized by the version-1
+// Device hello contract. The enum is deliberately closed.
+func SupportedPlatform(value string) bool {
+	return value == PlatformLinux || value == PlatformWindows
+}
 
 var (
 	ErrFrameTooLarge    = errors.New("protocol frame is too large")

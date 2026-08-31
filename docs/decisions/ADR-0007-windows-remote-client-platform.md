@@ -119,3 +119,16 @@ PID 的 process token/`TokenLogonSid` 并复核 PID，不使用依赖先读字�
 状态仍为 `Proposed`：目前的实机是 elevated Windows Server 2022 hosted runner，
 尚缺普通桌面用户下的 Windows 11/Windows 10 22H2、第二 logon 拒绝、干净 VM、
 GUI 启动生产 Core 的无 console flash/保活以及真实 Tunnel/Terminal 证据。
+
+## Task024 当前证据（2026-08-31）
+
+生产 Remote 已完成 common Core/platform backend 拆分：CLI runtime policy、Identity storage、
+authenticated local IPC transport 和 SSH execution/session-process 均有明确接口与 Linux
+build-tagged 实现；SSH wire/session、JSON dispatch、Ed25519 语义和 Remote 状态机保持共同。
+Tunnel hello 只新增严格 `linux|windows` 枚举，未知值继续拒绝，协议版本不变。Linux 的真实
+SSH 进程回收、IPC、Qt 与 AppImage 门通过，Windows Task023 probe 仍可交叉构建。
+
+本证据只证明 Windows backend 有安全接入点。DPAPI/named pipe/token、PowerShell/Job 与
+ConPTY 的生产 constructor 仍未实现，生产 Windows Client 仍不能构建/运行，因此不改变本
+ADR 的 Proposed 状态或接受条件。详细命令、AppImage hash 与已知 DSH 测试夹具见
+`docs/agent_context/tasks/task024/summary.md`。

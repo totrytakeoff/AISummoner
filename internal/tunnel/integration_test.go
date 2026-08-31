@@ -262,6 +262,29 @@ func TestAuthenticationTranscriptExactShape(t *testing.T) {
 	}
 }
 
+func TestValidateHelloAcceptsOnlySupportedDevicePlatforms(t *testing.T) {
+	deviceIdentity := testIdentity(t)
+	base := protocol.ClientHello{
+		DeviceID:        deviceIdentity.DeviceID,
+		DevicePublicKey: base64.RawURLEncoding.EncodeToString(deviceIdentity.PublicKey),
+		DeviceName:      "platform-device", Arch: "amd64", ClientVersion: "test",
+	}
+	for _, platform := range []string{protocol.PlatformLinux, protocol.PlatformWindows} {
+		hello := base
+		hello.Platform = platform
+		if _, err := validateHello(hello); err != nil {
+			t.Fatalf("supported platform %q: %v", platform, err)
+		}
+	}
+	for _, platform := range []string{"", "darwin", "windows\x00linux"} {
+		hello := base
+		hello.Platform = platform
+		if _, err := validateHello(hello); err == nil {
+			t.Fatalf("unsupported platform %q was accepted", platform)
+		}
+	}
+}
+
 func TestGatewayAuthenticationTimeout(t *testing.T) {
 	gateway, err := NewGateway(GatewayOptions{
 		Store:   &tunnelStoreFake{devices: make(map[string]store.Device), lastSeen: make(map[string]time.Time)},

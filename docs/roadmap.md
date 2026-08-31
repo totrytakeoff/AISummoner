@@ -41,8 +41,9 @@ Capability 权威；不能引入 Browser 直连 Provider 或 Server 本地 shell
 - **Linux**：继续稳定 Qt AppImage、安装/更新、权限提示和真实 Ubuntu 验收。
 - **Windows**：复用 Go Remote Core 状态机和 Qt UI；首版采用普通用户会话内的后台 Core，
   新增带 logon-SID 验证的 Named Pipe、DPAPI Device Identity、PowerShell/ConPTY、Job Object
-  进程树回收和原生 Qt 打包。先完成兼容性/安全 spike，再实现并签名发布；不把 Core 直接
-  注册为 LocalSystem Service。详细方案见
+  进程树回收和原生 Qt 打包。兼容性/安全 spike 与共同 Core 平台接口拆分已完成；下一步是
+  实现真实 Windows Core/Identity/IPC，再依次接入 exec、Terminal、GUI 与 Agent profile，
+  最后才签名发布；不把 Core 直接注册为 LocalSystem Service。详细方案见
   [Windows 被控客户端移植方案](design/windows-remote-client-port.md)。
 - **macOS**：在 Windows 边界稳定后再评估，不提前承诺。
 

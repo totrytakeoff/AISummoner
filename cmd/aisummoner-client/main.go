@@ -9,12 +9,10 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/signal"
-	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/aisummoner/aisummoner/internal/clientipc"
+	"github.com/aisummoner/aisummoner/internal/clientplatform"
 	"github.com/aisummoner/aisummoner/internal/remoteclient"
 )
 
@@ -60,7 +58,7 @@ func run(arguments []string, logger *slog.Logger) error {
 			return err
 		}
 		if socketPath == "" {
-			socketPath = clientipc.DefaultSocketPath(dataDirectory)
+			socketPath = clientipc.DefaultEndpoint(dataDirectory)
 		}
 		return runControl(arguments[0], socketPath, os.Stdout)
 	default:
@@ -73,7 +71,7 @@ func runForeground(options launchOptions, logger *slog.Logger, pairingOutput io.
 	if err != nil {
 		return err
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := clientplatform.Current().NotifyShutdown(context.Background())
 	defer stop()
 	logger.Info("starting device client", "device_id", controller.DeviceID())
 	runDone := make(chan error, 1)
@@ -97,12 +95,12 @@ func runDaemon(options launchOptions, logger *slog.Logger) error {
 		return err
 	}
 	server, err := clientipc.NewServer(clientipc.ServerOptions{
-		SocketPath: options.socketPath, Controller: controller, Logger: logger,
+		Endpoint: options.socketPath, Controller: controller, Logger: logger,
 	})
 	if err != nil {
 		return err
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := clientplatform.Current().NotifyShutdown(context.Background())
 	defer stop()
 	runContext, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -162,14 +160,14 @@ func runControl(command, socketPath string, output io.Writer) error {
 }
 
 func parseLaunchOptions(command string, arguments []string, daemon bool) (launchOptions, error) {
-	home, err := os.UserHomeDir()
+	defaultDataDirectory, err := clientplatform.Current().DefaultDataDirectory()
 	if err != nil {
 		return launchOptions{}, fmt.Errorf("find user home: %w", err)
 	}
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	serverURL := flags.String("server", "", "AISummoner Server base URL")
-	dataDirectory := flags.String("data-dir", filepath.Join(home, ".local", "share", "aisummoner"), "private client data directory")
+	dataDirectory := flags.String("data-dir", defaultDataDirectory, "private client data directory")
 	deviceName := flags.String("name", "", "device display name (defaults to hostname)")
 	development := flags.Bool("dev", false, "allow plaintext ws for local development")
 	allowRootDevelopment := flags.Bool("allow-root-dev", false, "dangerously allow root only in development mode")
@@ -183,7 +181,7 @@ func parseLaunchOptions(command string, arguments []string, daemon bool) (launch
 	if !daemon && *socketPath != "" {
 		return launchOptions{}, errors.New("--socket is available only in daemon mode")
 	}
-	if err := validateRootMode(os.Geteuid(), *development, *allowRootDevelopment); err != nil {
+	if err := clientplatform.Current().ValidatePrivilege(*development, *allowRootDevelopment); err != nil {
 		return launchOptions{}, err
 	}
 	if *deviceName == "" {
@@ -193,11 +191,15 @@ func parseLaunchOptions(command string, arguments []string, daemon bool) (launch
 		}
 	}
 	if daemon && *socketPath == "" {
-		*socketPath = clientipc.DefaultSocketPath(*dataDirectory)
+		*socketPath = clientipc.DefaultEndpoint(*dataDirectory)
 	}
-	if daemon && (!filepath.IsAbs(*dataDirectory) || !filepath.IsAbs(*socketPath) ||
-		filepath.Clean(filepath.Dir(*socketPath)) != filepath.Clean(*dataDirectory)) {
-		return launchOptions{}, errors.New("daemon data directory must be absolute and contain its socket")
+	if daemon {
+		if err := clientplatform.Current().ValidateDataDirectory(*dataDirectory); err != nil {
+			return launchOptions{}, errors.New("daemon data directory must be absolute and contain its socket")
+		}
+		if err := clientipc.ValidateEndpointForDataDirectory(*dataDirectory, *socketPath); err != nil {
+			return launchOptions{}, errors.New("daemon data directory must be absolute and contain its socket")
+		}
 	}
 	return launchOptions{
 		serverURL: *serverURL, dataDirectory: *dataDirectory, deviceName: *deviceName,
@@ -207,29 +209,26 @@ func parseLaunchOptions(command string, arguments []string, daemon bool) (launch
 }
 
 func parseControlOptions(command string, arguments []string) (string, string, error) {
-	home, err := os.UserHomeDir()
+	defaultDataDirectory, err := clientplatform.Current().DefaultDataDirectory()
 	if err != nil {
 		return "", "", fmt.Errorf("find user home: %w", err)
 	}
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	dataDirectory := flags.String("data-dir", filepath.Join(home, ".local", "share", "aisummoner"), "private client data directory")
+	dataDirectory := flags.String("data-dir", defaultDataDirectory, "private client data directory")
 	socketPath := flags.String("socket", "", "private local daemon socket")
 	if err := flags.Parse(arguments); err != nil || flags.NArg() != 0 {
 		return "", "", errors.New("invalid local control arguments")
 	}
-	if !filepath.IsAbs(*dataDirectory) || (*socketPath != "" &&
-		(!filepath.IsAbs(*socketPath) || filepath.Clean(filepath.Dir(*socketPath)) != filepath.Clean(*dataDirectory))) {
+	if err := clientplatform.Current().ValidateDataDirectory(*dataDirectory); err != nil {
 		return "", "", errors.New("local control data directory must be absolute and contain its socket")
 	}
-	return *dataDirectory, *socketPath, nil
-}
-
-func validateRootMode(effectiveUID int, development, allowRootDevelopment bool) error {
-	if effectiveUID == 0 && !(development && allowRootDevelopment) {
-		return errors.New("refusing to run as root (development requires both --dev and --allow-root-dev)")
+	if *socketPath != "" {
+		if err := clientipc.ValidateEndpointForDataDirectory(*dataDirectory, *socketPath); err != nil {
+			return "", "", errors.New("local control data directory must be absolute and contain its socket")
+		}
 	}
-	return nil
+	return *dataDirectory, *socketPath, nil
 }
 
 func usageError() error {

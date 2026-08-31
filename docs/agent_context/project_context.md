@@ -1,7 +1,7 @@
 ---
 type: project_context
 status: active
-updated_by: planner
+updated_by: coder
 ---
 
 # Project Context
@@ -79,14 +79,16 @@ AISummoner is a browser-controlled, server-side Agent and SSH remote execution p
   event v2, richer native actions and the other Runtime adapters remain work.
 - Task015/016 implemented the Qt 6 Widgets Remote Desktop Client and a
   zero-configuration GUI+daemon AppImage. Linux is the only supported Remote
-  platform today. Proposed ADR-0007 and the Windows port design now define a
+  platform today. Proposed ADR-0007 and the Windows port design define a
   common-Core/platform-backend approach: per-user background lifecycle,
   authenticated named-pipe IPC, DPAPI identity, PowerShell/ConPTY/Job Objects,
   native Qt packaging and a target-aware Agent execution profile. Task023's
-  Windows Server 2022 CI has proven the reusable API/toolchain contracts and
-  an unsigned Qt engineering bundle; ordinary-user Windows 11/10, wrong-logon,
-  clean-VM and production Core E2E evidence remain, so Windows is not yet a
-  supported Remote platform and ADR-0007 remains Proposed.
+  Windows Server 2022 CI proved the reusable native API/toolchain contracts;
+  Task024 has now extracted production Runtime policy, Identity storage, IPC
+  transport and SSH execution seams while preserving Linux AppImage/SSH gates
+  and enabling only the strict hello enum. Concrete Windows Core backends,
+  ordinary-user Windows 11/10, wrong-logon, clean-VM and production E2E remain,
+  so Windows is not yet supported and ADR-0007 remains Proposed.
 
 ## Constraints
 

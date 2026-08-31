@@ -1,7 +1,7 @@
 ---
 task_id: task024
 type: plan
-status: in_progress
+status: ready_for_review
 from: planner
 to: coder
 revision: 0
