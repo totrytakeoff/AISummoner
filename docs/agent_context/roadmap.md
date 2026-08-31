@@ -95,8 +95,8 @@ updated_by: coder
 - [x] A8.2 task026 (ready for human review): native PowerShell exec/Job cleanup
   passes the real TLS/WSS/yamux/strict-SSH chain while shell stays fail closed;
   the unsigned package is engineering evidence, not a Windows support claim.
-- [ ] A8.2 task027: implement ConPTY Terminal, resize/interrupt and joined
-  cleanup through the same production chain.
+- [ ] A8.2 task027 (in progress): implement ConPTY Terminal, resize/interrupt
+  and joined cleanup through the same production chain.
 - [ ] A8.3 task028-task029: ship a clean-VM Qt engineering ZIP, add the trusted
   Agent Execution Profile/DSH PowerShell path, then sign/package after E2E.
 - [ ] Structured Remote file read/search/write/patch/diff.

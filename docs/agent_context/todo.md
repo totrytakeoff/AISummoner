@@ -29,6 +29,11 @@ updated_by: coder
   Tunnel shutdown while ConPTY shell and the Windows Agent profile remain fail
   closed. Tasks025-026 retain independent-review debt.
 
+- [ ] task027 (in progress under the active user goal): replace fail-closed
+  Windows interactive shell with production ConPTY, fixed PowerShell 5.1,
+  VT/UTF-8, resize/Ctrl-C and joined Job/pipe/handle cleanup through the real
+  native chain. Task028 GUI and Task029 Agent/release gates remain out of scope.
+
 - [ ] task023 (in progress): Windows Server 2022 CI now proves the strict
   Qt↔Go named-pipe path, exact peer-token check, DPAPI/ACL, suspended Job,
   PowerShell/ConPTY runtime, Qt/MSVC build and unsigned contract bundle. The
@@ -96,9 +101,9 @@ updated_by: coder
 
 ## Next
 
-- [ ] Implement task027's production ConPTY Terminal, resize/Ctrl-C and joined
-  cleanup through the native chain. Windows Agent operations remain fail closed
-  until Task029's trusted Execution Profile and real DSH Turn pass.
+- [ ] Finish and review task027's production ConPTY Terminal. Windows Agent
+  operations remain fail closed until Task029's trusted Execution Profile and
+  real DSH Turn pass.
 - [ ] Complete Task023's ordinary-user Windows 11/10, wrong-logon and clean-VM
   evidence before accepting or revising Proposed ADR-0007. This validation now
   runs alongside the user-authorized, non-enabling Task024 extraction.
