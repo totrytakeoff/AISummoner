@@ -383,7 +383,9 @@ Agent 或 Windows 正式支持。**
 ### Task026：Windows exec 与 Job Object
 
 完成 PowerShell 非 PTY exec、cwd、stdout/stderr/exit、timeout/cancel 和完整进程树回收，并
-通过真实 WSS/yamux/SSH 链路；这是 Agent transport 的底座。
+通过真实 TLS/WSS/yamux/strict SSH 链路；这是 Agent transport 的底座。
+**当前实现任务：Task025 的独立 review 仍作为债务记录，持续用户目标只授权推进，不视为
+review verdict。**
 
 ### Task027：ConPTY Terminal
 

@@ -22,6 +22,12 @@ updated_by: coder
   `aisummoner-client.exe`. Exec/shell reject explicitly until Tasks026-027;
   Git Bash is only a possible later optional profile, not a bundled dependency.
 
+- [ ] task026 (in progress under the active user goal): replace the production
+  Windows exec rejection with PowerShell 5.1, suspended Job assignment,
+  separate UTF-8 streams, exact status and joined descendant cleanup. Prove it
+  through native TLS/WSS→yamux→strict SSH while keeping ConPTY shell and the
+  Windows Agent profile fail closed. Task025's independent review remains debt.
+
 - [ ] task023 (in progress): Windows Server 2022 CI now proves the strict
   Qt↔Go named-pipe path, exact peer-token check, DPAPI/ACL, suspended Job,
   PowerShell/ConPTY runtime, Qt/MSVC build and unsigned contract bundle. The
@@ -89,8 +95,8 @@ updated_by: coder
 
 ## Next
 
-- [ ] Review task025, then start task026's native PowerShell/Job Object exec;
-  unsupported Terminal/Agent operations remain fail closed until their own
+- [ ] Finish and review task026's native PowerShell/Job Object exec; ConPTY
+  Terminal and Windows Agent operations remain fail closed until their own
   production backends pass.
 - [ ] Complete Task023's ordinary-user Windows 11/10, wrong-logon and clean-VM
   evidence before accepting or revising Proposed ADR-0007. This validation now

@@ -92,8 +92,10 @@ updated_by: coder
   execution boundary pass native Windows plus Linux regression CI. The
   checksummed unsigned engineering ZIP contains the real Core; Task023 desktop
   VM evidence remains release debt.
-- [ ] A8.2 task026-task027: implement PowerShell exec/Job cleanup and ConPTY
-  Terminal through the real WSS/yamux/strict-SSH chain.
+- [ ] A8.2 task026 (in progress): implement native PowerShell exec/Job cleanup
+  through the real TLS/WSS/yamux/strict-SSH chain while shell stays fail closed.
+- [ ] A8.2 task027: implement ConPTY Terminal, resize/interrupt and joined
+  cleanup through the same production chain.
 - [ ] A8.3 task028-task029: ship a clean-VM Qt engineering ZIP, add the trusted
   Agent Execution Profile/DSH PowerShell path, then sign/package after E2E.
 - [ ] Structured Remote file read/search/write/patch/diff.
