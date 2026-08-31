@@ -44,12 +44,26 @@ bool isServiceAccount(PSID userSid)
 
 namespace aisummoner {
 
+QString windowsPrivilegeViolationForFacts(bool querySucceeded, bool elevated,
+                                           quint32 integrityRid, quint32 sessionId,
+                                           bool serviceAccount)
+{
+    if (!querySucceeded) {
+        return QStringLiteral("无法验证当前 Windows 用户权限，程序已安全停止。");
+    }
+    constexpr quint32 mandatoryHighRid = 0x00003000;
+    if (elevated || integrityRid >= mandatoryHighRid || sessionId == 0 || serviceAccount) {
+        return QStringLiteral("出于安全考虑，被控客户端必须由普通桌面用户启动，请勿使用管理员身份运行。");
+    }
+    return {};
+}
+
 QString privilegeViolation()
 {
 #ifdef Q_OS_WIN
     HANDLE token = nullptr;
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
-        return QStringLiteral("无法验证当前 Windows 用户权限，程序已安全停止。");
+        return windowsPrivilegeViolationForFacts(false, false, 0, 0, false);
     }
     struct TokenCloser {
         HANDLE token;
@@ -59,33 +73,31 @@ QString privilegeViolation()
     TOKEN_ELEVATION elevation{};
     DWORD returned = 0;
     if (!GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &returned)) {
-        return QStringLiteral("无法验证当前 Windows 用户权限，程序已安全停止。");
+        return windowsPrivilegeViolationForFacts(false, false, 0, 0, false);
     }
     QByteArray integrityStorage;
     QByteArray userStorage;
     if (!queryToken(token, TokenIntegrityLevel, &integrityStorage)
         || !queryToken(token, TokenUser, &userStorage)) {
-        return QStringLiteral("无法验证当前 Windows 用户权限，程序已安全停止。");
+        return windowsPrivilegeViolationForFacts(false, false, 0, 0, false);
     }
     const auto *integrity = reinterpret_cast<const TOKEN_MANDATORY_LABEL *>(integrityStorage.constData());
     const auto *user = reinterpret_cast<const TOKEN_USER *>(userStorage.constData());
     if (!IsValidSid(integrity->Label.Sid) || !IsValidSid(user->User.Sid)) {
-        return QStringLiteral("无法验证当前 Windows 用户权限，程序已安全停止。");
+        return windowsPrivilegeViolationForFacts(false, false, 0, 0, false);
     }
     const DWORD count = *GetSidSubAuthorityCount(integrity->Label.Sid);
     if (count == 0) {
-        return QStringLiteral("无法验证当前 Windows 用户权限，程序已安全停止。");
+        return windowsPrivilegeViolationForFacts(false, false, 0, 0, false);
     }
     const DWORD integrityRid = *GetSidSubAuthority(integrity->Label.Sid, count - 1);
     DWORD session = 0;
     if (!ProcessIdToSessionId(GetCurrentProcessId(), &session)) {
-        return QStringLiteral("无法验证当前 Windows 用户权限，程序已安全停止。");
+        return windowsPrivilegeViolationForFacts(false, false, 0, 0, false);
     }
-    if (elevation.TokenIsElevated != 0 || integrityRid >= SECURITY_MANDATORY_HIGH_RID
-        || session == 0 || isServiceAccount(user->User.Sid)) {
-        return QStringLiteral("出于安全考虑，被控客户端必须由普通桌面用户启动，请勿使用管理员身份运行。");
-    }
-    return {};
+    return windowsPrivilegeViolationForFacts(true, elevation.TokenIsElevated != 0,
+                                             integrityRid, session,
+                                             isServiceAccount(user->User.Sid));
 #else
     if (geteuid() == 0) {
         return QStringLiteral("出于安全考虑，被控客户端不能以 root 身份运行。");

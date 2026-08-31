@@ -50,6 +50,17 @@ QString daemonFileName()
 #endif
 }
 
+#ifdef Q_OS_WIN
+bool isWindowsReparsePoint(const QFileInfo &info)
+{
+    const QString nativePath = QDir::toNativeSeparators(info.absoluteFilePath());
+    const DWORD attributes = GetFileAttributesW(
+        reinterpret_cast<LPCWSTR>(nativePath.utf16()));
+    return attributes == INVALID_FILE_ATTRIBUTES
+        || (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+}
+#endif
+
 } // namespace
 
 DaemonLauncher::DaemonLauncher(QString applicationDirectory, QString dataDirectory,
@@ -135,9 +146,13 @@ std::optional<LaunchSpec> DaemonLauncher::buildLaunchSpec(const QString &applica
     const QFileInfo daemonInfo(QDir(applicationDirectory).filePath(daemonFileName()));
     const QString canonicalDaemonPath = daemonInfo.canonicalFilePath();
     const QFileInfo canonicalDaemonInfo(canonicalDaemonPath);
-    if (canonicalApplicationDirectory.isEmpty() || !daemonInfo.exists() || !daemonInfo.isFile()
+    if (canonicalApplicationDirectory.isEmpty() || !appDirectoryInfo.exists()
+        || !appDirectoryInfo.isDir() || !daemonInfo.exists() || !daemonInfo.isFile()
         || daemonInfo.isSymLink() || !daemonInfo.isExecutable() || canonicalDaemonPath.isEmpty()
         || canonicalDaemonInfo.canonicalPath() != canonicalApplicationDirectory
+#ifdef Q_OS_WIN
+        || isWindowsReparsePoint(appDirectoryInfo) || isWindowsReparsePoint(daemonInfo)
+#endif
 #ifndef Q_OS_WIN
         || daemonInfo.permissions().testFlag(QFileDevice::WriteGroup)
         || daemonInfo.permissions().testFlag(QFileDevice::WriteOther)

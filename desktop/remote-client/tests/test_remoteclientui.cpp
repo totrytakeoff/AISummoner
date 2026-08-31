@@ -4,6 +4,7 @@
 #include "eventmodel.h"
 #include "mainwindow.h"
 #include "models.h"
+#include "platformsecurity.h"
 #include "strictjson.h"
 #include "theme.h"
 
@@ -179,6 +180,7 @@ private slots:
     void daemonClientResetsEventStreamAfterDaemonReconnect();
     void daemonClientRejectsInvalidAndTimesOut();
     void launcherUsesOnlySafeSiblingAndExactArguments();
+    void windowsPrivilegePolicyMatchesCoreContract();
     void settingsPersistOnlyAllowlistedValues();
     void widgetsExposeAllStatesAndPairingSafety();
     void mainWindowHasThreePagesAndCloseDoesNotPause();
@@ -429,6 +431,27 @@ void RemoteClientUiTest::launcherUsesOnlySafeSiblingAndExactArguments()
     launcher.startDaemon(QStringLiteral("https://control.example"), QStringLiteral("name"));
     launcher.startDaemon(QStringLiteral("https://control.example"), QStringLiteral("name"));
     QCOMPARE(starts, 1);
+
+    DaemonLauncher failingLauncher(temporary.path(), data, nullptr,
+        [](const QString &, const QStringList &, const QString &, qint64 *pid) {
+            *pid = -1;
+            return false;
+        });
+    QSignalSpy failureSpy(&failingLauncher, &DaemonLauncher::launchFinished);
+    failingLauncher.startDaemon(QStringLiteral("https://control.example"), QStringLiteral("name"));
+    QVERIFY(!failingLauncher.isBusy());
+    QCOMPARE(failureSpy.count(), 1);
+    QVERIFY(!failureSpy.at(0).at(0).toBool());
+}
+
+void RemoteClientUiTest::windowsPrivilegePolicyMatchesCoreContract()
+{
+    QVERIFY(!windowsPrivilegeViolationForFacts(false, false, 0, 0, false).isEmpty());
+    QVERIFY(windowsPrivilegeViolationForFacts(true, false, 0x2000, 2, false).isEmpty());
+    QVERIFY(!windowsPrivilegeViolationForFacts(true, true, 0x2000, 2, false).isEmpty());
+    QVERIFY(!windowsPrivilegeViolationForFacts(true, false, 0x3000, 2, false).isEmpty());
+    QVERIFY(!windowsPrivilegeViolationForFacts(true, false, 0x2000, 0, false).isEmpty());
+    QVERIFY(!windowsPrivilegeViolationForFacts(true, false, 0x2000, 2, true).isEmpty());
 }
 
 void RemoteClientUiTest::settingsPersistOnlyAllowlistedValues()

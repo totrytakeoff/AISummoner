@@ -80,6 +80,18 @@ if(BUILD_TESTING)
         target_link_libraries(aisummoner_windows_ipc_probe PRIVATE
             aisummoner_remote_ui
         )
+
+        qt_add_executable(aisummoner_windows_lifecycle_probe
+            tests/windows_lifecycle_probe.cpp
+        )
+        target_link_libraries(aisummoner_windows_lifecycle_probe PRIVATE
+            aisummoner_remote_ui
+        )
+        add_test(NAME aisummoner_windows_lifecycle_probe
+                 COMMAND aisummoner_windows_lifecycle_probe)
+        set_tests_properties(aisummoner_windows_lifecycle_probe PROPERTIES
+            TIMEOUT 45
+        )
     endif()
 endif()
 
