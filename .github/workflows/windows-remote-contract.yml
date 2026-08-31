@@ -175,3 +175,38 @@ jobs:
             dist/AISummoner-Windows-Remote-Engineering-x86_64.zip.sha256
           if-no-files-found: error
           retention-days: 14
+
+  linux-regression:
+    name: Linux Core regression / amd64
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    env:
+      GOMAXPROCS: "2"
+      GOFLAGS: "-p=1"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test Linux production seams
+        shell: bash
+        run: |
+          set -euo pipefail
+          packages=(
+            ./internal/clientplatform
+            ./internal/identity
+            ./internal/clientipc
+            ./internal/sshserver
+            ./internal/remoteclient
+            ./internal/tunnel
+            ./cmd/aisummoner-client
+          )
+          go test -buildvcs=false -count=1 "${packages[@]}"
+          go test -buildvcs=false -count=1 -race "${packages[@]:0:6}"
+          go vet -buildvcs=false "${packages[@]}"
