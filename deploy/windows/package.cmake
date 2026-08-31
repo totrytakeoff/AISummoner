@@ -46,18 +46,6 @@ if(NOT gui_manifest_result EQUAL 0)
     message(FATAL_ERROR "embedding GUI asInvoker manifest failed: ${gui_manifest_output}${gui_manifest_error}")
 endif()
 
-execute_process(
-    COMMAND "${MT_EXECUTABLE}" -nologo
-            -manifest "${root}/cmd/aisummoner-client/aisummoner-client.manifest"
-            "-outputresource:${CORE_EXECUTABLE}"
-    RESULT_VARIABLE manifest_result
-    OUTPUT_VARIABLE manifest_output
-    ERROR_VARIABLE manifest_error
-)
-if(NOT manifest_result EQUAL 0)
-    message(FATAL_ERROR "embedding Core asInvoker manifest failed: ${manifest_output}${manifest_error}")
-endif()
-
 file(REMOVE_RECURSE "${stage}")
 file(MAKE_DIRECTORY "${stage}")
 file(COPY "${GUI_EXECUTABLE}" "${CORE_EXECUTABLE}" DESTINATION "${stage}")

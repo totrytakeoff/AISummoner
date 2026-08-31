@@ -164,6 +164,20 @@ jobs:
             }
           }
           if (-not $env:VCINSTALLDIR) { throw "vcvars64 did not set VCINSTALLDIR" }
+
+          $coreResourceDirectory = Join-Path $pwd "cmd/aisummoner-client"
+          $coreResourceRes = Join-Path $env:RUNNER_TEMP "aisummoner-client-resource.res"
+          $coreResourceSyso = Join-Path $coreResourceDirectory "resource_windows_amd64.syso"
+          Push-Location $coreResourceDirectory
+          try {
+            & rc.exe /nologo /fo $coreResourceRes aisummoner-client.rc
+            & cvtres.exe /nologo /machine:x64 "/out:$coreResourceSyso" $coreResourceRes
+          } finally {
+            Pop-Location
+          }
+          go build -buildvcs=false -trimpath `
+            -o dist/windows-core/aisummoner-client.exe ./cmd/aisummoner-client
+
           $archive = "dist/AISummoner-Windows-Remote-Engineering-x86_64.zip"
           $mt = (Get-Command mt.exe -ErrorAction Stop).Source
           $signtool = (Get-Command signtool.exe -ErrorAction Stop).Source
