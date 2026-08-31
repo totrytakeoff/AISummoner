@@ -64,3 +64,15 @@ func TestPowerShellPathAndWorkingDirectoryContracts(t *testing.T) {
 		}
 	}
 }
+
+func TestPowerShellConPTYRejectsInvalidDimensionsBeforeLaunch(t *testing.T) {
+	for _, dimensions := range [][2]int16{{0, 24}, {80, 0}, {-1, 24}, {80, -1}} {
+		process, err := StartPowerShellConPTY("", dimensions[0], dimensions[1])
+		if err == nil {
+			t.Fatalf("ConPTY dimensions %v were accepted: %+v", dimensions, process)
+		}
+		if process.Job != 0 || process.Process != 0 || process.Pseudo != 0 || process.Input != nil || process.Output != nil {
+			t.Fatalf("invalid ConPTY dimensions returned owned resources: %+v", process)
+		}
+	}
+}

@@ -192,6 +192,277 @@ exit 9
 	}
 }
 
+func TestWindowsTunnelSSHConPTYEndToEnd(t *testing.T) {
+	fixture := newWindowsTunnelSSHFixture(t)
+	workingDirectory := t.TempDir()
+	terminalContext, cancelTerminal := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelTerminal()
+	handle, capture, drained := openWindowsTestPTY(t, fixture, terminalContext, workingDirectory)
+	defer handle.Close()
+	waitForWindowsPTYBytes(t, terminalContext, capture, []byte("PS "))
+	if err := handle.Resize(101, 37); err != nil {
+		t.Fatal(err)
+	}
+	initialPrompts := capture.Count([]byte("PS "))
+	command := `$s=$Host.UI.RawUI.WindowSize; ` +
+		`Write-Output ("AIS_PTY_"+"SIZE="+$s.Width+"x"+$s.Height); ` +
+		`Write-Output ("AIS_PTY_"+"CWD="+(Get-Location).Path); ` +
+		`Write-Output ("AIS_PTY_"+"READY_中文"); Start-Sleep -Seconds 120` + "\r"
+	if _, err := io.WriteString(handle.Input(), command); err != nil {
+		t.Fatal(err)
+	}
+	waitForWindowsPTYBytes(t, terminalContext, capture, []byte("AIS_PTY_READY_中文"))
+	waitForWindowsPTYBytes(t, terminalContext, capture, []byte("AIS_PTY_SIZE=101x37"))
+	if _, err := handle.Input().Write([]byte{3}); err != nil {
+		t.Fatal(err)
+	}
+	waitForWindowsPTYCount(t, terminalContext, capture, []byte("PS "), initialPrompts+1)
+	if _, err := io.WriteString(
+		handle.Input(), `Write-Output ("AIS_PTY_"+"DONE_中文"); exit 0`+"\r",
+	); err != nil {
+		t.Fatal(err)
+	}
+	waitForWindowsPTYBytes(t, terminalContext, capture, []byte("AIS_PTY_DONE_中文"))
+	if err := waitForWindowsPTYResult(t, handle, 10*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitForWindowsPTYDrain(t, drained, 5*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	reportedDirectory, err := windowsMarkerText(capture.Bytes(), "AIS_PTY_CWD=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantedInfo, wantedErr := os.Stat(workingDirectory)
+	reportedInfo, reportedErr := os.Stat(reportedDirectory)
+	if wantedErr != nil || reportedErr != nil || !os.SameFile(wantedInfo, reportedInfo) {
+		t.Fatalf("ConPTY cwd %q is not %q: wanted_err=%v reported_err=%v",
+			reportedDirectory, workingDirectory, wantedErr, reportedErr)
+	}
+
+	sentinelExecutable, err := winprocess.PowerShellPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sentinel := exec.Command(sentinelExecutable, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 120")
+	if err := sentinel.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = sentinel.Process.Kill()
+		_ = sentinel.Wait()
+	})
+
+	t.Run("normal_root_exit_joins_descendant", func(t *testing.T) {
+		pty, output, outputDone := openWindowsTestPTY(t, fixture, context.Background(), t.TempDir())
+		waitForWindowsPTYBytes(t, context.Background(), output, []byte("PS "))
+		if _, err := io.WriteString(pty.Input(), windowsPTYChildCommand("AIS_NORMAL_", "CHILD=", false)); err != nil {
+			pty.Close()
+			t.Fatal(err)
+		}
+		pid := waitForWindowsPTYMarkerPID(t, output, "AIS_NORMAL_CHILD=")
+		if err := waitForWindowsPTYResult(t, pty, 10*time.Second); err != nil {
+			pty.Close()
+			t.Fatal(err)
+		}
+		_ = pty.Close()
+		_ = waitForWindowsPTYDrain(t, outputDone, 5*time.Second)
+		waitForWindowsProcessGone(t, pid)
+	})
+
+	t.Run("close_joins_descendant", func(t *testing.T) {
+		pty, output, outputDone := openWindowsTestPTY(t, fixture, context.Background(), t.TempDir())
+		waitForWindowsPTYBytes(t, context.Background(), output, []byte("PS "))
+		if _, err := io.WriteString(pty.Input(), windowsPTYChildCommand("AIS_CLOSE_", "CHILD=", true)); err != nil {
+			pty.Close()
+			t.Fatal(err)
+		}
+		pid := waitForWindowsPTYMarkerPID(t, output, "AIS_CLOSE_CHILD=")
+		_ = pty.Close()
+		_ = waitForWindowsPTYResult(t, pty, 10*time.Second)
+		_ = waitForWindowsPTYDrain(t, outputDone, 5*time.Second)
+		waitForWindowsProcessGone(t, pid)
+		if !fixture.manager.IsOnline(fixture.deviceID) {
+			t.Fatal("closing one Windows PTY closed the Device Tunnel")
+		}
+	})
+
+	t.Run("context_cancel_joins_descendant", func(t *testing.T) {
+		ptyContext, cancelPTY := context.WithCancel(context.Background())
+		pty, output, outputDone := openWindowsTestPTY(t, fixture, ptyContext, t.TempDir())
+		waitForWindowsPTYBytes(t, ptyContext, output, []byte("PS "))
+		if _, err := io.WriteString(pty.Input(), windowsPTYChildCommand("AIS_CANCEL_", "CHILD=", true)); err != nil {
+			cancelPTY()
+			pty.Close()
+			t.Fatal(err)
+		}
+		pid := waitForWindowsPTYMarkerPID(t, output, "AIS_CANCEL_CHILD=")
+		cancelPTY()
+		if err := waitForWindowsPTYResult(t, pty, 10*time.Second); !errors.Is(err, context.Canceled) {
+			pty.Close()
+			t.Fatalf("ConPTY cancellation error = %v", err)
+		}
+		_ = pty.Close()
+		_ = waitForWindowsPTYDrain(t, outputDone, 5*time.Second)
+		waitForWindowsProcessGone(t, pid)
+		if !fixture.manager.IsOnline(fixture.deviceID) {
+			t.Fatal("canceling one Windows PTY closed the Device Tunnel")
+		}
+	})
+
+	if !windowsProcessStillRunning(uint32(sentinel.Process.Pid)) {
+		t.Fatal("ConPTY cleanup terminated an unrelated process")
+	}
+
+	t.Run("tunnel_shutdown_joins_descendant", func(t *testing.T) {
+		pty, output, outputDone := openWindowsTestPTY(t, fixture, context.Background(), t.TempDir())
+		waitForWindowsPTYBytes(t, context.Background(), output, []byte("PS "))
+		if _, err := io.WriteString(pty.Input(), windowsPTYChildCommand("AIS_SHUTDOWN_", "CHILD=", true)); err != nil {
+			pty.Close()
+			t.Fatal(err)
+		}
+		pid := waitForWindowsPTYMarkerPID(t, output, "AIS_SHUTDOWN_CHILD=")
+		if err := fixture.stopClient(); err != nil {
+			pty.Close()
+			t.Fatal(err)
+		}
+		_ = waitForWindowsPTYResult(t, pty, 10*time.Second)
+		_ = pty.Close()
+		_ = waitForWindowsPTYDrain(t, outputDone, 5*time.Second)
+		waitForWindowsProcessGone(t, pid)
+	})
+
+	if !windowsProcessStillRunning(uint32(sentinel.Process.Pid)) {
+		t.Fatal("Windows Tunnel shutdown terminated an unrelated process")
+	}
+}
+
+type windowsPTYCapture struct {
+	mu       sync.Mutex
+	contents bytes.Buffer
+}
+
+func (capture *windowsPTYCapture) Write(contents []byte) (int, error) {
+	capture.mu.Lock()
+	defer capture.mu.Unlock()
+	return capture.contents.Write(contents)
+}
+
+func (capture *windowsPTYCapture) Bytes() []byte {
+	capture.mu.Lock()
+	defer capture.mu.Unlock()
+	return bytes.Clone(capture.contents.Bytes())
+}
+
+func (capture *windowsPTYCapture) Contains(marker []byte) bool {
+	capture.mu.Lock()
+	defer capture.mu.Unlock()
+	return bytes.Contains(capture.contents.Bytes(), marker)
+}
+
+func (capture *windowsPTYCapture) Count(marker []byte) int {
+	capture.mu.Lock()
+	defer capture.mu.Unlock()
+	return bytes.Count(capture.contents.Bytes(), marker)
+}
+
+func openWindowsTestPTY(t *testing.T, fixture *windowsTunnelSSHFixture, ctx context.Context, cwd string) (*PTY, *windowsPTYCapture, <-chan error) {
+	t.Helper()
+	handle, err := fixture.dialer.OpenPTY(
+		ctx, fixture.deviceID, PTYOptions{Cols: 80, Rows: 24, CWD: cwd},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture := &windowsPTYCapture{}
+	drained := make(chan error, 1)
+	go func() {
+		_, copyErr := io.Copy(capture, handle.Output())
+		drained <- copyErr
+	}()
+	return handle, capture, drained
+}
+
+func waitForWindowsPTYBytes(t *testing.T, ctx context.Context, capture *windowsPTYCapture, marker []byte) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if capture.Contains(marker) {
+			return
+		}
+		if err := ctx.Err(); err != nil {
+			t.Fatalf("wait for ConPTY marker %q: %v; output=%q", marker, err, capture.Bytes())
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("ConPTY marker %q did not arrive; output=%q", marker, capture.Bytes())
+}
+
+func waitForWindowsPTYCount(t *testing.T, ctx context.Context, capture *windowsPTYCapture, marker []byte, count int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if capture.Count(marker) >= count {
+			return
+		}
+		if err := ctx.Err(); err != nil {
+			t.Fatalf("wait for ConPTY marker %q count %d: %v; output=%q", marker, count, err, capture.Bytes())
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("ConPTY marker %q count %d did not arrive; output=%q", marker, count, capture.Bytes())
+}
+
+func waitForWindowsPTYResult(t *testing.T, handle *PTY, timeout time.Duration) error {
+	t.Helper()
+	result := make(chan error, 1)
+	go func() { result <- handle.Wait() }()
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(timeout):
+		return errors.New("Windows PTY did not join before timeout")
+	}
+}
+
+func waitForWindowsPTYDrain(t *testing.T, drained <-chan error, timeout time.Duration) error {
+	t.Helper()
+	select {
+	case err := <-drained:
+		return err
+	case <-time.After(timeout):
+		return errors.New("Windows PTY output drain did not join before timeout")
+	}
+}
+
+func waitForWindowsPTYMarkerPID(t *testing.T, capture *windowsPTYCapture, marker string) uint32 {
+	t.Helper()
+	waitForWindowsPTYBytes(t, context.Background(), capture, []byte(marker))
+	value, err := windowsMarkerText(capture.Bytes(), marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.ParseUint(value, 10, 32)
+	if err != nil || pid == 0 {
+		t.Fatalf("invalid ConPTY PID marker %q: value=%q err=%v output=%q", marker, value, err, capture.Bytes())
+	}
+	return uint32(pid)
+}
+
+func windowsPTYChildCommand(markerLeft, markerRight string, wait bool) string {
+	command := fmt.Sprintf(
+		`$exe=Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"; `+
+			`$child=Start-Process -FilePath $exe -ArgumentList @("-NoLogo","-NoProfile","-NonInteractive","-Command","Start-Sleep -Seconds 120") -PassThru; `+
+			`Write-Output (%q+%q+$child.Id)`, markerLeft, markerRight,
+	)
+	if wait {
+		command += `; Wait-Process -Id $child.Id`
+	} else {
+		command += `; exit 0`
+	}
+	return command + "\r"
+}
+
 type windowsTunnelSSHFixture struct {
 	deviceID   string
 	dialer     *Dialer

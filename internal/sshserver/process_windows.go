@@ -145,14 +145,38 @@ func (windowsExecutionBackend) startExec(ctx context.Context, channel ssh.Channe
 		stdin: stdinWrite, stdout: stdoutRead, stderr: stderrRead,
 		done: make(chan struct{}),
 	}
-	process.startPumps(channel)
+	process.startExecPumps(channel)
 	process.watchContext(ctx)
 	started = true
 	return process, nil
 }
 
-func (windowsExecutionBackend) startShell(context.Context, ssh.Channel, *ptyState, string) (sessionProcess, error) {
-	return nil, errors.New("Windows SSH shell requires the ConPTY backend")
+func (windowsExecutionBackend) startShell(ctx context.Context, channel ssh.Channel, request *ptyState, cwd string) (sessionProcess, error) {
+	if ctx == nil || channel == nil || request == nil {
+		return nil, errors.New("Windows SSH shell requires a context, channel and PTY")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !validWindow(request.cols, request.rows) {
+		return nil, errors.New("Windows ConPTY dimensions are invalid")
+	}
+	if len(cwd) > MaxCWDBytes {
+		return nil, errors.New("Windows ConPTY working directory is too long")
+	}
+	native, err := winprocess.StartPowerShellConPTY(cwd, int16(request.cols), int16(request.rows))
+	if err != nil {
+		return nil, err
+	}
+	process := &windowsProcess{
+		job: native.Job, process: native.Process, pid: native.ProcessID,
+		pseudo: native.Pseudo, terminal: true,
+		stdin: native.Input, stdout: native.Output,
+		done: make(chan struct{}),
+	}
+	process.startTerminalPumps(channel)
+	process.watchContext(ctx)
+	return process, nil
 }
 
 type windowsProcessState uint8
@@ -164,13 +188,15 @@ const (
 )
 
 type windowsProcess struct {
-	job     windows.Handle
-	process windows.Handle
-	pid     uint32
-	stdin   *os.File
-	stdout  *os.File
-	stderr  *os.File
-	done    chan struct{}
+	job      windows.Handle
+	process  windows.Handle
+	pid      uint32
+	pseudo   windows.Handle
+	terminal bool
+	stdin    *os.File
+	stdout   *os.File
+	stderr   *os.File
+	done     chan struct{}
 
 	inputPump  sync.WaitGroup
 	outputPump sync.WaitGroup
@@ -179,9 +205,10 @@ type windowsProcess struct {
 
 	lifecycleMu sync.Mutex
 	lifecycle   windowsProcessState
+	terminalMu  sync.Mutex
 }
 
-func (process *windowsProcess) startPumps(channel ssh.Channel) {
+func (process *windowsProcess) startExecPumps(channel ssh.Channel) {
 	process.inputPump.Add(1)
 	go func() {
 		defer process.inputPump.Done()
@@ -198,6 +225,23 @@ func (process *windowsProcess) startPumps(channel ssh.Channel) {
 		defer process.outputPump.Done()
 		defer process.stderr.Close()
 		_, _ = io.Copy(channel.Stderr(), process.stderr)
+	}()
+}
+
+func (process *windowsProcess) startTerminalPumps(channel ssh.Channel) {
+	process.inputPump.Add(1)
+	go func() {
+		defer process.inputPump.Done()
+		_, _ = io.Copy(process.stdin, channel)
+		// PTY input EOF represents an interactive client disconnect rather than
+		// the benign stdin EOF accepted by a non-interactive exec.
+		process.terminate()
+	}()
+	process.outputPump.Add(1)
+	go func() {
+		defer process.outputPump.Done()
+		defer process.stdout.Close()
+		_, _ = io.Copy(channel, process.stdout)
 	}()
 }
 
@@ -228,6 +272,7 @@ func (process *windowsProcess) wait() int {
 		_ = windows.TerminateJobObject(job, result.ExitCode)
 	}
 	process.closeStdin()
+	process.closePseudoConsole()
 	process.outputPump.Wait()
 	if result.Err != nil {
 		return 255
@@ -238,7 +283,20 @@ func (process *windowsProcess) wait() int {
 func (process *windowsProcess) signalRequest(request processSignal) error {
 	switch request {
 	case processSignalInterrupt:
-		return errors.New("non-PTY Windows interrupt is unsupported")
+		if !process.terminal {
+			return errors.New("non-PTY Windows interrupt is unsupported")
+		}
+		process.lifecycleMu.Lock()
+		if process.lifecycle != windowsProcessActive || process.stdin == nil {
+			process.lifecycleMu.Unlock()
+			return errors.New("process is unavailable")
+		}
+		input := process.stdin
+		process.lifecycleMu.Unlock()
+		if _, err := input.Write([]byte{3}); err != nil {
+			return fmt.Errorf("write Windows ConPTY interrupt: %w", err)
+		}
+		return nil
 	case processSignalTerminate:
 		return process.terminateActiveJob(143)
 	case processSignalKill:
@@ -250,12 +308,15 @@ func (process *windowsProcess) signalRequest(request processSignal) error {
 
 func (process *windowsProcess) terminateActiveJob(exitCode uint32) error {
 	process.lifecycleMu.Lock()
-	defer process.lifecycleMu.Unlock()
 	if process.lifecycle != windowsProcessActive || process.job == 0 {
+		process.lifecycleMu.Unlock()
 		return errors.New("process is unavailable")
 	}
 	process.closeStdin()
-	if err := windows.TerminateJobObject(process.job, exitCode); err != nil {
+	err := windows.TerminateJobObject(process.job, exitCode)
+	process.lifecycleMu.Unlock()
+	process.closePseudoConsole()
+	if err != nil {
 		return fmt.Errorf("terminate Windows process Job: %w", err)
 	}
 	return nil
@@ -264,13 +325,32 @@ func (process *windowsProcess) terminateActiveJob(exitCode uint32) error {
 func (process *windowsProcess) terminate() {
 	process.closeStdin()
 	process.lifecycleMu.Lock()
-	defer process.lifecycleMu.Unlock()
 	if process.lifecycle != windowsProcessFinished && process.job != 0 {
 		_ = windows.TerminateJobObject(process.job, 1)
 	}
+	process.lifecycleMu.Unlock()
+	process.closePseudoConsole()
 }
 
-func (*windowsProcess) resizeTerminal(uint32, uint32) bool { return false }
+func (process *windowsProcess) resizeTerminal(cols, rows uint32) bool {
+	if !process.terminal || !validWindow(cols, rows) {
+		return false
+	}
+	process.lifecycleMu.Lock()
+	if process.lifecycle != windowsProcessActive {
+		process.lifecycleMu.Unlock()
+		return false
+	}
+	process.terminalMu.Lock()
+	process.lifecycleMu.Unlock()
+	defer process.terminalMu.Unlock()
+	if process.pseudo == 0 {
+		return false
+	}
+	return windows.ResizePseudoConsole(
+		process.pseudo, windows.Coord{X: int16(cols), Y: int16(rows)},
+	) == nil
+}
 
 func (process *windowsProcess) doneChannel() <-chan struct{} { return process.done }
 
@@ -293,6 +373,15 @@ func (process *windowsProcess) finish() {
 		}
 		close(process.done)
 	})
+}
+
+func (process *windowsProcess) closePseudoConsole() {
+	process.terminalMu.Lock()
+	defer process.terminalMu.Unlock()
+	if process.pseudo != 0 {
+		windows.ClosePseudoConsole(process.pseudo)
+		process.pseudo = 0
+	}
 }
 
 func (process *windowsProcess) closeStdin() {

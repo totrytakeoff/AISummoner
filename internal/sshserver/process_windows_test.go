@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -40,7 +42,7 @@ func TestWindowsExecutionBackendPathAndFailClosedShellContracts(t *testing.T) {
 		t.Fatal("invalid UTF-8 Windows exec reported success")
 	}
 	if process, err := backend.startShell(context.Background(), nil, &ptyState{term: "xterm", cols: 80, rows: 24}, validated); err == nil || process != nil {
-		t.Fatal("unsupported Windows ConPTY shell reported success")
+		t.Fatal("Windows ConPTY shell without an SSH channel reported success")
 	}
 }
 
@@ -83,6 +85,78 @@ func TestWindowsPowerShellExecRepeatedlyClosesNativeHandles(t *testing.T) {
 	}
 }
 
+func TestWindowsConPTYShellRepeatedlyClosesNativeHandles(t *testing.T) {
+	backend := windowsExecutionBackend{}
+	directory, err := backend.validateWorkingDirectory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func() {
+		t.Helper()
+		channel := newWindowsPTYTestChannel()
+		process, err := backend.startShell(
+			context.Background(), channel,
+			&ptyState{term: "xterm-256color", cols: 80, rows: 24}, directory,
+		)
+		if err != nil {
+			channel.Close()
+			t.Fatal(err)
+		}
+		if !process.resizeTerminal(101, 37) {
+			process.terminate()
+			channel.Close()
+			process.finish()
+			t.Fatal("live Windows ConPTY rejected resize")
+		}
+		if _, err := channel.inputWriter.Write([]byte("exit 0\r")); err != nil {
+			process.terminate()
+			channel.Close()
+			process.finish()
+			t.Fatal(err)
+		}
+		waited := make(chan int, 1)
+		go func() { waited <- process.wait() }()
+		var status int
+		select {
+		case status = <-waited:
+		case <-time.After(15 * time.Second):
+			process.terminate()
+			channel.Close()
+			status = <-waited
+			process.finish()
+			t.Fatalf("Windows ConPTY shell did not exit; final status=%d", status)
+		}
+		channel.Close()
+		process.finish()
+		if status != 0 {
+			t.Fatalf("Windows ConPTY status = %d", status)
+		}
+		if process.resizeTerminal(120, 40) {
+			t.Fatal("finished Windows ConPTY accepted resize")
+		}
+		select {
+		case <-process.doneChannel():
+		default:
+			t.Fatal("Windows ConPTY did not publish joined completion")
+		}
+	}
+	run()
+	before, err := windowsCurrentProcessHandleCount()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 4; attempt++ {
+		run()
+	}
+	after, err := windowsCurrentProcessHandleCount()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after > before+8 {
+		t.Fatalf("ConPTY handle count grew from %d to %d", before, after)
+	}
+}
+
 type windowsTestChannel struct{}
 
 func (windowsTestChannel) Read([]byte) (int, error)                       { return 0, io.EOF }
@@ -91,6 +165,37 @@ func (windowsTestChannel) Close() error                                   { retu
 func (windowsTestChannel) CloseWrite() error                              { return nil }
 func (windowsTestChannel) SendRequest(string, bool, []byte) (bool, error) { return false, nil }
 func (channel windowsTestChannel) Stderr() io.ReadWriter                  { return channel }
+
+type windowsPTYTestChannel struct {
+	inputReader *io.PipeReader
+	inputWriter *io.PipeWriter
+	closeOnce   sync.Once
+}
+
+func newWindowsPTYTestChannel() *windowsPTYTestChannel {
+	reader, writer := io.Pipe()
+	return &windowsPTYTestChannel{inputReader: reader, inputWriter: writer}
+}
+
+func (channel *windowsPTYTestChannel) Read(contents []byte) (int, error) {
+	return channel.inputReader.Read(contents)
+}
+
+func (*windowsPTYTestChannel) Write(contents []byte) (int, error) { return len(contents), nil }
+
+func (channel *windowsPTYTestChannel) Close() error {
+	channel.closeOnce.Do(func() {
+		_ = channel.inputWriter.Close()
+		_ = channel.inputReader.Close()
+	})
+	return nil
+}
+
+func (channel *windowsPTYTestChannel) CloseWrite() error { return channel.inputWriter.Close() }
+
+func (*windowsPTYTestChannel) SendRequest(string, bool, []byte) (bool, error) { return false, nil }
+
+func (channel *windowsPTYTestChannel) Stderr() io.ReadWriter { return channel }
 
 var windowsGetProcessHandleCount = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetProcessHandleCount")
 

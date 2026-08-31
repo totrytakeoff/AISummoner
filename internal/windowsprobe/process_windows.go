@@ -11,7 +11,6 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
-	"unsafe"
 
 	"github.com/aisummoner/aisummoner/internal/winprocess"
 	"golang.org/x/sys/windows"
@@ -221,97 +220,13 @@ type conPTYWrite struct {
 
 // StartConPTY starts a fixed Windows PowerShell 5.1 interactive shell.
 func StartConPTY(workingDirectory string, columns, rows int16) (*ConPTYSession, error) {
-	if columns < 1 || rows < 1 {
-		return nil, errors.New("ConPTY dimensions must be positive")
-	}
-	workingDirectory, err := winprocess.ResolveWorkingDirectory(workingDirectory)
+	process, err := winprocess.StartPowerShellConPTY(workingDirectory, columns, rows)
 	if err != nil {
 		return nil, err
 	}
-	executable, err := winprocess.PowerShellPath()
-	if err != nil {
-		return nil, err
-	}
-	inputRead, inputWrite, err := os.Pipe()
-	if err != nil {
-		return nil, fmt.Errorf("create ConPTY input pipe: %w", err)
-	}
-	outputRead, outputWrite, err := os.Pipe()
-	if err != nil {
-		inputRead.Close()
-		inputWrite.Close()
-		return nil, fmt.Errorf("create ConPTY output pipe: %w", err)
-	}
-	cleanupPipes := func() {
-		inputRead.Close()
-		inputWrite.Close()
-		outputRead.Close()
-		outputWrite.Close()
-	}
-	var pseudo windows.Handle
-	if err := windows.CreatePseudoConsole(
-		windows.Coord{X: columns, Y: rows}, windows.Handle(inputRead.Fd()),
-		windows.Handle(outputWrite.Fd()), 0, &pseudo,
-	); err != nil {
-		cleanupPipes()
-		return nil, fmt.Errorf("create ConPTY: %w", err)
-	}
-	attributes, err := windows.NewProcThreadAttributeList(1)
-	if err != nil {
-		windows.ClosePseudoConsole(pseudo)
-		cleanupPipes()
-		return nil, fmt.Errorf("allocate ConPTY attributes: %w", err)
-	}
-	defer attributes.Delete()
-	pseudoValue := *(*unsafe.Pointer)(unsafe.Pointer(&pseudo))
-	if err := attributes.Update(
-		windows.PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-		pseudoValue, unsafe.Sizeof(pseudo),
-	); err != nil {
-		windows.ClosePseudoConsole(pseudo)
-		cleanupPipes()
-		return nil, fmt.Errorf("attach ConPTY attribute: %w", err)
-	}
-	startup := windows.StartupInfoEx{
-		// Explicit null standard handles prevent a console-attached parent (for
-		// example a CI runner) from donating its own console streams. The
-		// pseudoconsole then remains the child's only console I/O path.
-		StartupInfo: windows.StartupInfo{
-			Cb:    uint32(unsafe.Sizeof(windows.StartupInfoEx{})),
-			Flags: windows.STARTF_USESTDHANDLES,
-		},
-		ProcThreadAttributeList: attributes.List(),
-	}
-	job, err := winprocess.NewKillOnCloseJob()
-	if err != nil {
-		windows.ClosePseudoConsole(pseudo)
-		cleanupPipes()
-		return nil, err
-	}
-	encoded, err := winprocess.EncodePowerShellCommand(winprocess.UTF8PowerShellPrefix)
-	if err != nil {
-		windows.CloseHandle(job)
-		windows.ClosePseudoConsole(pseudo)
-		cleanupPipes()
-		return nil, err
-	}
-	process, err := winprocess.CreateSuspendedInJob(
-		job, executable,
-		[]string{"-NoLogo", "-NoProfile", "-NoExit", "-EncodedCommand", encoded},
-		workingDirectory, &startup, false, 0,
-	)
-	if err != nil {
-		windows.CloseHandle(job)
-		windows.ClosePseudoConsole(pseudo)
-		cleanupPipes()
-		return nil, err
-	}
-	// The pseudoconsole keeps its own references after child creation.
-	inputRead.Close()
-	outputWrite.Close()
 	session := &ConPTYSession{
-		job: job, process: process.Process, pid: process.ProcessId, pseudo: pseudo,
-		input: inputWrite, output: outputRead,
+		job: process.Job, process: process.Process, pid: process.ProcessID, pseudo: process.Pseudo,
+		input: process.Input, output: process.Output,
 		requests: make(chan conPTYWrite, 8), chunks: make(chan []byte, 32),
 		closing: make(chan struct{}), drainDone: make(chan struct{}),
 		writeDone: make(chan struct{}), processDone: make(chan struct{}),

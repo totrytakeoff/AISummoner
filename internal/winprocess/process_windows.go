@@ -19,7 +19,7 @@ import (
 )
 
 // UTF8PowerShellPrefix freezes the Windows PowerShell 5.1 stream encoding used
-// by both non-interactive exec and the later ConPTY backend.
+// by both non-interactive exec and the production ConPTY backend.
 const UTF8PowerShellPrefix = `$utf8 = [System.Text.UTF8Encoding]::new($false); ` +
 	`[Console]::InputEncoding = $utf8; [Console]::OutputEncoding = $utf8; $OutputEncoding = $utf8; `
 
