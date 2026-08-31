@@ -14,8 +14,10 @@ on:
       - "deploy/windows/**"
       - "LICENSE"
       - "THIRD_PARTY_NOTICES.md"
+      - "internal/agent/**"
       - "internal/clientipc/**"
       - "internal/clientplatform/**"
+      - "internal/dsh/**"
       - "internal/identity/**"
       - "internal/protocol/**"
       - "internal/remoteclient/**"
@@ -77,6 +79,8 @@ jobs:
             ./internal/clientplatform `
             ./internal/identity `
             ./internal/clientipc `
+            ./internal/agent `
+            ./internal/dsh `
             ./internal/sshserver `
             ./internal/sshclient
           go test -buildvcs=false -count=1 -timeout=3m -v ./internal/windowsprobe
@@ -87,6 +91,8 @@ jobs:
             ./internal/clientplatform `
             ./internal/identity `
             ./internal/clientipc `
+            ./internal/agent `
+            ./internal/dsh `
             ./internal/sshserver `
             ./internal/sshclient `
             ./internal/remoteclient `
