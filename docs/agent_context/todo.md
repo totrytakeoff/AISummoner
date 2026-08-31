@@ -101,7 +101,7 @@ updated_by: coder
 
 ## Next
 
-- [ ] task028: complete the ordinary-user Qt GUI sibling-Core launcher,
+- [ ] task028 (implementation in progress): complete the ordinary-user Qt GUI sibling-Core launcher,
   no-console-flash and GUI-close daemon-survival contracts, then validate the
   portable engineering package on a clean Windows 11/10 desktop. Windows Agent
   operations remain fail closed until Task029's trusted Execution Profile and

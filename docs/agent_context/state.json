@@ -2,12 +2,12 @@
   "workflow_id": "AISummoner-2026-08-12-001",
   "project": "AISummoner",
   "context_dir": "docs/agent_context",
-  "current_task": "task027",
-  "current_stage": "review",
-  "status": "ready_for_review",
+  "current_task": "task028",
+  "current_stage": "planning",
+  "status": "ready_for_implementation",
   "iteration": 0,
-  "last_decision": "TASK027_NATIVE_CONPTY_CHAIN_PASSED_WITH_ORDINARY_USER_DESKTOP_GATES_DEFERRED_TO_TASK028",
-  "next_agent": "human_reviewer",
+  "last_decision": "ACTIVE_USER_GOAL_ADVANCES_TASK028_WITH_TASK025_TASK027_REVIEW_DEBT_RECORDED",
+  "next_agent": "coder",
   "max_revisions_per_task": 3,
-  "updated_at": "2026-08-31T14:30:00+08:00"
+  "updated_at": "2026-08-31T14:31:00+08:00"
 }
