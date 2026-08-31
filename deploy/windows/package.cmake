@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 foreach(name IN ITEMS ROOT_DIR GUI_EXECUTABLE CORE_EXECUTABLE MT_EXECUTABLE
                       DUMPBIN_EXECUTABLE SIGNTOOL_EXECUTABLE WINDEPLOYQT_EXECUTABLE
+                      QT_LICENSE_ROOT QT_LICENSE_SOURCE_COMMIT
                       DIST_DIR ARCHIVE_PATH SOURCE_COMMIT
                       PRODUCT_VERSION GO_VERSION QT_VERSION DEFAULT_SERVER_ORIGIN)
     if(NOT DEFINED ${name} OR "${${name}}" STREQUAL "")
@@ -23,7 +24,10 @@ foreach(path IN ITEMS "${GUI_EXECUTABLE}" "${CORE_EXECUTABLE}"
                       "${root}/deploy/windows/README.txt"
                       "${root}/deploy/windows/QT_SOURCE_OFFER.txt"
                       "${root}/desktop/remote-client/resources/aisummoner-client-ui.manifest"
-                      "${root}/cmd/aisummoner-client/aisummoner-client.manifest")
+                      "${root}/cmd/aisummoner-client/aisummoner-client.manifest"
+                      "${QT_LICENSE_ROOT}"
+                      "${QT_LICENSE_ROOT}/LGPL-3.0-only.txt"
+                      "${QT_LICENSE_ROOT}/Qt-GPL-exception-1.0.txt")
     if(NOT EXISTS "${path}")
         message(FATAL_ERROR "required package source is missing: ${path}")
     endif()
@@ -60,19 +64,7 @@ file(COPY "${root}/LICENSE" "${root}/THIRD_PARTY_NOTICES.md" DESTINATION "${stag
 file(COPY "${root}/deploy/windows/README.txt"
           "${root}/deploy/windows/QT_SOURCE_OFFER.txt" DESTINATION "${stage}")
 
-get_filename_component(qt_bin "${WINDEPLOYQT_EXECUTABLE}" DIRECTORY)
-get_filename_component(qt_prefix "${qt_bin}" DIRECTORY)
-set(qt_license_root "")
-foreach(candidate IN ITEMS "${qt_prefix}/LICENSES" "${qt_prefix}/licenses"
-                           "${qt_prefix}/../LICENSES" "${qt_prefix}/../../LICENSES")
-    if(EXISTS "${candidate}/LGPL-3.0-only.txt")
-        file(REAL_PATH "${candidate}" qt_license_root)
-        break()
-    endif()
-endforeach()
-if(qt_license_root STREQUAL "")
-    message(FATAL_ERROR "Qt open-source license texts were not found beside windeployqt")
-endif()
+file(REAL_PATH "${QT_LICENSE_ROOT}" qt_license_root)
 file(MAKE_DIRECTORY "${stage}/THIRD_PARTY_LICENSES/Qt")
 file(COPY "${qt_license_root}/" DESTINATION "${stage}/THIRD_PARTY_LICENSES/Qt")
 

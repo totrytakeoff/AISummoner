@@ -50,6 +50,15 @@ jobs:
       - name: Check out source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      - name: Check out pinned Qt license texts
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: qt/qtbase
+          ref: c07c2d5a527a644d36e7853d55132ae38921682f # v6.8.3
+          path: build/qtbase-license-source
+          sparse-checkout: LICENSES
+          persist-credentials: false
+
       - name: Install Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
@@ -160,6 +169,11 @@ jobs:
           $dumpbin = (Get-Command dumpbin.exe -ErrorAction Stop).Source
           $signtool = (Get-Command signtool.exe -ErrorAction Stop).Source
           $windeployqt = (Get-Command windeployqt.exe -ErrorAction Stop).Source
+          $qtLicenseRoot = Join-Path $pwd "build/qtbase-license-source/LICENSES"
+          $qtLicenseCommit = git -C build/qtbase-license-source rev-parse HEAD
+          if ($qtLicenseCommit -ne "c07c2d5a527a644d36e7853d55132ae38921682f") {
+            throw "unexpected Qt license source commit: $qtLicenseCommit"
+          }
           cmake `
             "-DROOT_DIR=$pwd" `
             "-DGUI_EXECUTABLE=$pwd/build/windows-remote/Release/aisummoner-client-ui.exe" `
@@ -168,6 +182,8 @@ jobs:
             "-DDUMPBIN_EXECUTABLE=$dumpbin" `
             "-DSIGNTOOL_EXECUTABLE=$signtool" `
             "-DWINDEPLOYQT_EXECUTABLE=$windeployqt" `
+            "-DQT_LICENSE_ROOT=$qtLicenseRoot" `
+            "-DQT_LICENSE_SOURCE_COMMIT=$qtLicenseCommit" `
             "-DDIST_DIR=$pwd/dist" `
             "-DARCHIVE_PATH=$pwd/$archive" `
             "-DSOURCE_COMMIT=$env:GITHUB_SHA" `

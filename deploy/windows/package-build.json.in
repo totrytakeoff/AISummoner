@@ -8,6 +8,7 @@
   "arch": "amd64",
   "go_version": "@GO_VERSION@",
   "qt_version": "@QT_VERSION@",
+  "qt_license_source_commit": "@QT_LICENSE_SOURCE_COMMIT@",
   "default_server_origin": "@DEFAULT_SERVER_ORIGIN@",
   "signed": false,
   "gui_sha256": "@GUI_SHA256@",
