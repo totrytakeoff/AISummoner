@@ -19,6 +19,7 @@ on:
       - "internal/sshserver/**"
       - "internal/tunnel/**"
       - "internal/winpipe/**"
+      - "internal/winprocess/**"
       - "internal/winsecurity/**"
       - "internal/windowsprobe/**"
       - "go.mod"
@@ -59,18 +60,22 @@ jobs:
           go test -buildvcs=false -count=1 -timeout=3m -v `
             ./internal/winsecurity `
             ./internal/winpipe `
-            ./internal/clientplatform `
-            ./internal/identity `
-            ./internal/clientipc `
-            ./internal/sshserver
-          go test -buildvcs=false -count=1 -timeout=3m -v ./internal/windowsprobe
-          go vet -buildvcs=false `
-            ./internal/winsecurity `
-            ./internal/winpipe `
+            ./internal/winprocess `
             ./internal/clientplatform `
             ./internal/identity `
             ./internal/clientipc `
             ./internal/sshserver `
+            ./internal/sshclient
+          go test -buildvcs=false -count=1 -timeout=3m -v ./internal/windowsprobe
+          go vet -buildvcs=false `
+            ./internal/winsecurity `
+            ./internal/winpipe `
+            ./internal/winprocess `
+            ./internal/clientplatform `
+            ./internal/identity `
+            ./internal/clientipc `
+            ./internal/sshserver `
+            ./internal/sshclient `
             ./internal/remoteclient `
             ./internal/tunnel `
             ./cmd/aisummoner-client

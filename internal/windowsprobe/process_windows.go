@@ -5,17 +5,15 @@ package windowsprobe
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
-	"unicode/utf16"
 	"unsafe"
 
+	"github.com/aisummoner/aisummoner/internal/winprocess"
 	"golang.org/x/sys/windows"
 )
 
@@ -42,15 +40,18 @@ func RunPowerShell(ctx context.Context, workingDirectory, script string) (Proces
 	if len(script) == 0 || len(script) > 64*1024 {
 		return ProcessResult{}, errors.New("PowerShell script must be between 1 and 65536 bytes")
 	}
-	workingDirectory, err := resolveWorkingDirectory(workingDirectory)
+	workingDirectory, err := winprocess.ResolveWorkingDirectory(workingDirectory)
 	if err != nil {
 		return ProcessResult{}, err
 	}
-	executable, err := windowsPowerShellPath()
+	executable, err := winprocess.PowerShellPath()
 	if err != nil {
 		return ProcessResult{}, err
 	}
-	encoded := encodePowerShellCommand(utf8PowerShellPrefix + script)
+	encoded, err := winprocess.EncodePowerShellCommand(winprocess.UTF8PowerShellPrefix + script)
+	if err != nil {
+		return ProcessResult{}, err
+	}
 
 	stdin, err := os.OpenFile("NUL", os.O_RDONLY, 0)
 	if err != nil {
@@ -98,12 +99,12 @@ func RunPowerShell(ctx context.Context, workingDirectory, script string) (Proces
 		},
 		ProcThreadAttributeList: attributes.List(),
 	}
-	job, err := newKillOnCloseJob()
+	job, err := winprocess.NewKillOnCloseJob()
 	if err != nil {
 		return ProcessResult{}, err
 	}
 	defer windows.CloseHandle(job)
-	process, err := createSuspendedInJob(
+	process, err := winprocess.CreateSuspendedInJob(
 		job, executable,
 		[]string{"-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded},
 		workingDirectory, &startup, true, windows.CREATE_NO_WINDOW,
@@ -129,10 +130,10 @@ func RunPowerShell(ctx context.Context, workingDirectory, script string) (Proces
 		drains <- copyErr
 	}()
 
-	waited := make(chan processWaitResult, 1)
-	go func() { waited <- waitForProcess(process.Process) }()
+	waited := make(chan winprocess.WaitResult, 1)
+	go func() { waited <- winprocess.WaitForProcess(process.Process) }()
 	cancelled := false
-	var waitResult processWaitResult
+	var waitResult winprocess.WaitResult
 	select {
 	case waitResult = <-waited:
 	case <-ctx.Done():
@@ -142,16 +143,16 @@ func RunPowerShell(ctx context.Context, workingDirectory, script string) (Proces
 	}
 	// A root shell can exit while a descendant still owns one of the output
 	// handles. Terminate the complete session Job before joining the drains.
-	_ = windows.TerminateJobObject(job, waitResult.exitCode)
+	_ = windows.TerminateJobObject(job, waitResult.ExitCode)
 	drainError := errors.Join(<-drains, <-drains)
 	result := ProcessResult{
-		PID: process.ProcessId, ExitCode: waitResult.exitCode,
+		PID: process.ProcessId, ExitCode: waitResult.ExitCode,
 		Stdout: stdoutCapture.Bytes(), Stderr: stderrCapture.Bytes(),
 		StdoutTruncated: stdoutCapture.Truncated(), StderrTruncated: stderrCapture.Truncated(),
 		Cancelled: cancelled,
 	}
-	if waitResult.err != nil {
-		return result, waitResult.err
+	if waitResult.Err != nil {
+		return result, waitResult.Err
 	}
 	if drainError != nil {
 		return result, fmt.Errorf("drain PowerShell output: %w", drainError)
@@ -160,130 +161,6 @@ func RunPowerShell(ctx context.Context, workingDirectory, script string) (Proces
 		return result, ctx.Err()
 	}
 	return result, nil
-}
-
-const utf8PowerShellPrefix = `$utf8 = [System.Text.UTF8Encoding]::new($false); ` +
-	`[Console]::InputEncoding = $utf8; [Console]::OutputEncoding = $utf8; $OutputEncoding = $utf8; `
-
-func encodePowerShellCommand(script string) string {
-	codeUnits := utf16.Encode([]rune(script))
-	encoded := make([]byte, len(codeUnits)*2)
-	for index, value := range codeUnits {
-		encoded[index*2] = byte(value)
-		encoded[index*2+1] = byte(value >> 8)
-	}
-	return base64.StdEncoding.EncodeToString(encoded)
-}
-
-func windowsPowerShellPath() (string, error) {
-	systemDirectory, err := windows.GetSystemDirectory()
-	if err != nil {
-		return "", fmt.Errorf("resolve Windows system directory: %w", err)
-	}
-	path := filepath.Join(systemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe")
-	if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() {
-		return "", fmt.Errorf("locate Windows PowerShell: %w", err)
-	}
-	return path, nil
-}
-
-func resolveWorkingDirectory(value string) (string, error) {
-	if value == "" {
-		profile, err := windows.KnownFolderPath(windows.FOLDERID_Profile, windows.KF_FLAG_DEFAULT)
-		if err != nil {
-			return "", fmt.Errorf("resolve user profile: %w", err)
-		}
-		value = profile
-	}
-	if !filepath.IsAbs(value) || filepath.Clean(value) != value {
-		return "", errors.New("PowerShell working directory must be a clean absolute path")
-	}
-	info, err := os.Stat(value)
-	if err != nil || !info.IsDir() {
-		return "", fmt.Errorf("inspect PowerShell working directory: %w", err)
-	}
-	return value, nil
-}
-
-func newKillOnCloseJob() (windows.Handle, error) {
-	job, err := windows.CreateJobObject(nil, nil)
-	if err != nil {
-		return 0, fmt.Errorf("create session Job Object: %w", err)
-	}
-	information := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
-	information.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-	if _, err := windows.SetInformationJobObject(
-		job, windows.JobObjectExtendedLimitInformation,
-		uintptr(unsafe.Pointer(&information)), uint32(unsafe.Sizeof(information)),
-	); err != nil {
-		windows.CloseHandle(job)
-		return 0, fmt.Errorf("set kill-on-close Job limit: %w", err)
-	}
-	return job, nil
-}
-
-func createSuspendedInJob(job windows.Handle, executable string, arguments []string,
-	workingDirectory string, startup *windows.StartupInfoEx, inheritHandles bool,
-	additionalFlags uint32,
-) (windows.ProcessInformation, error) {
-	executable16, err := windows.UTF16PtrFromString(executable)
-	if err != nil {
-		return windows.ProcessInformation{}, err
-	}
-	commandLine := windows.ComposeCommandLine(append([]string{executable}, arguments...))
-	commandLine16, err := windows.UTF16PtrFromString(commandLine)
-	if err != nil {
-		return windows.ProcessInformation{}, err
-	}
-	workingDirectory16, err := windows.UTF16PtrFromString(workingDirectory)
-	if err != nil {
-		return windows.ProcessInformation{}, err
-	}
-	var process windows.ProcessInformation
-	flags := uint32(windows.CREATE_SUSPENDED | windows.CREATE_UNICODE_ENVIRONMENT |
-		windows.EXTENDED_STARTUPINFO_PRESENT)
-	flags |= additionalFlags
-	if err := windows.CreateProcess(
-		executable16, commandLine16, nil, nil, inheritHandles, flags, nil,
-		workingDirectory16, &startup.StartupInfo, &process,
-	); err != nil {
-		return windows.ProcessInformation{}, fmt.Errorf("create suspended process: %w", err)
-	}
-	fail := func(cause error) (windows.ProcessInformation, error) {
-		_ = windows.TerminateProcess(process.Process, 1)
-		windows.CloseHandle(process.Thread)
-		windows.CloseHandle(process.Process)
-		return windows.ProcessInformation{}, cause
-	}
-	if err := windows.AssignProcessToJobObject(job, process.Process); err != nil {
-		return fail(fmt.Errorf("assign suspended process to Job Object: %w", err))
-	}
-	if _, err := windows.ResumeThread(process.Thread); err != nil {
-		return fail(fmt.Errorf("resume assigned process: %w", err))
-	}
-	windows.CloseHandle(process.Thread)
-	process.Thread = 0
-	return process, nil
-}
-
-type processWaitResult struct {
-	exitCode uint32
-	err      error
-}
-
-func waitForProcess(process windows.Handle) processWaitResult {
-	event, err := windows.WaitForSingleObject(process, windows.INFINITE)
-	if err != nil {
-		return processWaitResult{err: fmt.Errorf("wait for process: %w", err)}
-	}
-	if event != windows.WAIT_OBJECT_0 {
-		return processWaitResult{err: fmt.Errorf("unexpected process wait result: %d", event)}
-	}
-	var exitCode uint32
-	if err := windows.GetExitCodeProcess(process, &exitCode); err != nil {
-		return processWaitResult{err: fmt.Errorf("read process exit code: %w", err)}
-	}
-	return processWaitResult{exitCode: exitCode}
 }
 
 type boundedCapture struct {
@@ -330,7 +207,7 @@ type ConPTYSession struct {
 	processDone chan struct{}
 
 	processMu     sync.Mutex
-	processResult processWaitResult
+	processResult winprocess.WaitResult
 	nativeMu      sync.Mutex
 	closeOnce     sync.Once
 	closeError    error
@@ -347,11 +224,11 @@ func StartConPTY(workingDirectory string, columns, rows int16) (*ConPTYSession, 
 	if columns < 1 || rows < 1 {
 		return nil, errors.New("ConPTY dimensions must be positive")
 	}
-	workingDirectory, err := resolveWorkingDirectory(workingDirectory)
+	workingDirectory, err := winprocess.ResolveWorkingDirectory(workingDirectory)
 	if err != nil {
 		return nil, err
 	}
-	executable, err := windowsPowerShellPath()
+	executable, err := winprocess.PowerShellPath()
 	if err != nil {
 		return nil, err
 	}
@@ -405,14 +282,20 @@ func StartConPTY(workingDirectory string, columns, rows int16) (*ConPTYSession, 
 		},
 		ProcThreadAttributeList: attributes.List(),
 	}
-	job, err := newKillOnCloseJob()
+	job, err := winprocess.NewKillOnCloseJob()
 	if err != nil {
 		windows.ClosePseudoConsole(pseudo)
 		cleanupPipes()
 		return nil, err
 	}
-	encoded := encodePowerShellCommand(utf8PowerShellPrefix)
-	process, err := createSuspendedInJob(
+	encoded, err := winprocess.EncodePowerShellCommand(winprocess.UTF8PowerShellPrefix)
+	if err != nil {
+		windows.CloseHandle(job)
+		windows.ClosePseudoConsole(pseudo)
+		cleanupPipes()
+		return nil, err
+	}
+	process, err := winprocess.CreateSuspendedInJob(
 		job, executable,
 		[]string{"-NoLogo", "-NoProfile", "-NoExit", "-EncodedCommand", encoded},
 		workingDirectory, &startup, false, 0,
@@ -436,7 +319,7 @@ func StartConPTY(workingDirectory string, columns, rows int16) (*ConPTYSession, 
 	go session.drainOutput()
 	go session.writeInput()
 	go func() {
-		result := waitForProcess(session.process)
+		result := winprocess.WaitForProcess(session.process)
 		session.processMu.Lock()
 		session.processResult = result
 		session.processMu.Unlock()
@@ -500,7 +383,7 @@ func (session *ConPTYSession) Wait(ctx context.Context) (uint32, error) {
 		session.processMu.Lock()
 		result := session.processResult
 		session.processMu.Unlock()
-		return result.exitCode, result.err
+		return result.ExitCode, result.Err
 	case <-ctx.Done():
 		return 0, ctx.Err()
 	}
