@@ -68,19 +68,19 @@ func TestWindowsPowerShellExecRepeatedlyClosesNativeHandles(t *testing.T) {
 			t.Fatal("PowerShell process did not publish joined completion")
 		}
 	}
-	// Exclude bounded process-wide initialization by Go and the Windows process
-	// stack from the leak slope. A single launch is insufficient on hosted
-	// Windows runners: the first several launches may populate a small handle
-	// cache, while a real per-exec leak continues growing after this warm-up.
+	command := `[Console]::Out.Write("stdout"); [Console]::Error.Write("stderr")`
+	// Exclude bounded process-wide initialization by Go and the complete
+	// stdout/stderr pump path from the leak slope. A real per-exec leak keeps
+	// growing when the identical command is repeated after this warm-up.
 	for attempt := 0; attempt < 8; attempt++ {
-		run(`[Console]::Out.Write("warmup")`)
+		run(command)
 	}
 	before, err := windowsCurrentProcessHandleCount()
 	if err != nil {
 		t.Fatal(err)
 	}
 	for attempt := 0; attempt < 8; attempt++ {
-		run(`[Console]::Out.Write("stdout"); [Console]::Error.Write("stderr")`)
+		run(command)
 	}
 	after, err := windowsCurrentProcessHandleCount()
 	if err != nil {
