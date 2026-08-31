@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 
 foreach(name IN ITEMS ROOT_DIR GUI_EXECUTABLE CORE_EXECUTABLE MT_EXECUTABLE
-                      DUMPBIN_EXECUTABLE SIGNTOOL_EXECUTABLE WINDEPLOYQT_EXECUTABLE
+                      PE_INSPECTOR_EXECUTABLE SIGNTOOL_EXECUTABLE WINDEPLOYQT_EXECUTABLE
                       QT_LICENSE_ROOT QT_LICENSE_SOURCE_COMMIT
                       DIST_DIR ARCHIVE_PATH SOURCE_COMMIT
                       PRODUCT_VERSION GO_VERSION QT_VERSION DEFAULT_SERVER_ORIGIN)
@@ -20,6 +20,7 @@ if(NOT stage_prefix EQUAL 0 OR stage STREQUAL dist)
 endif()
 
 foreach(path IN ITEMS "${GUI_EXECUTABLE}" "${CORE_EXECUTABLE}"
+                      "${PE_INSPECTOR_EXECUTABLE}"
                       "${root}/LICENSE" "${root}/THIRD_PARTY_NOTICES.md"
                       "${root}/deploy/windows/README.txt"
                       "${root}/deploy/windows/QT_SOURCE_OFFER.txt"
@@ -131,17 +132,27 @@ foreach(executable IN ITEMS aisummoner-client-ui.exe aisummoner-client.exe)
     endif()
 endforeach()
 
-execute_process(COMMAND "${DUMPBIN_EXECUTABLE}" /headers
-                "${stage}/aisummoner-client-ui.exe"
-                RESULT_VARIABLE gui_headers_result OUTPUT_VARIABLE gui_headers ERROR_VARIABLE gui_headers_error)
-if(NOT gui_headers_result EQUAL 0 OR NOT gui_headers MATCHES "subsystem \\(Windows GUI\\)")
-    message(FATAL_ERROR "Qt executable is not Windows GUI subsystem: ${gui_headers_error}")
+execute_process(
+    COMMAND "${PE_INSPECTOR_EXECUTABLE}" --mode pe-subsystem
+            --executable "${stage}/aisummoner-client-ui.exe"
+    RESULT_VARIABLE gui_subsystem_result
+    OUTPUT_VARIABLE gui_subsystem
+    ERROR_VARIABLE gui_subsystem_error
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(NOT gui_subsystem_result EQUAL 0 OR NOT gui_subsystem STREQUAL "windows-gui")
+    message(FATAL_ERROR "Qt executable subsystem check failed: result=${gui_subsystem_result}, output=${gui_subsystem}, error=${gui_subsystem_error}")
 endif()
-execute_process(COMMAND "${DUMPBIN_EXECUTABLE}" /headers
-                "${stage}/aisummoner-client.exe"
-                RESULT_VARIABLE core_headers_result OUTPUT_VARIABLE core_headers ERROR_VARIABLE core_headers_error)
-if(NOT core_headers_result EQUAL 0 OR NOT core_headers MATCHES "subsystem \\(Windows CUI\\)")
-    message(FATAL_ERROR "Core executable is not Windows console subsystem: ${core_headers_error}")
+execute_process(
+    COMMAND "${PE_INSPECTOR_EXECUTABLE}" --mode pe-subsystem
+            --executable "${stage}/aisummoner-client.exe"
+    RESULT_VARIABLE core_subsystem_result
+    OUTPUT_VARIABLE core_subsystem
+    ERROR_VARIABLE core_subsystem_error
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(NOT core_subsystem_result EQUAL 0 OR NOT core_subsystem STREQUAL "windows-cui")
+    message(FATAL_ERROR "Core executable subsystem check failed: result=${core_subsystem_result}, output=${core_subsystem}, error=${core_subsystem_error}")
 endif()
 
 file(SHA256 "${stage}/aisummoner-client-ui.exe" GUI_SHA256)

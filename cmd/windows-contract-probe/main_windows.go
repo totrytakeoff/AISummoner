@@ -7,6 +7,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"debug/pe"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -37,9 +38,10 @@ type response struct {
 }
 
 func main() {
-	mode := flag.String("mode", "pipe-server", "pipe-server or facts")
+	mode := flag.String("mode", "pipe-server", "pipe-server, facts, or pe-subsystem")
 	pipeName := flag.String("pipe", windowsprobe.DefaultQtPipeName, "Qt QLocalSocket server name")
 	readyFile := flag.String("ready-file", "", "write this marker after the listener is ready")
+	executable := flag.String("executable", "", "PE executable to inspect")
 	flag.Parse()
 
 	var err error
@@ -48,6 +50,8 @@ func main() {
 		err = printFacts()
 	case "pipe-server":
 		err = servePipe(*pipeName, *readyFile)
+	case "pe-subsystem":
+		err = printPESubsystem(*executable)
 	default:
 		err = fmt.Errorf("unknown mode %q", *mode)
 	}
@@ -55,6 +59,36 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func printPESubsystem(path string) error {
+	if path == "" {
+		return errors.New("PE executable path is required")
+	}
+	file, err := pe.Open(path)
+	if err != nil {
+		return fmt.Errorf("open PE executable: %w", err)
+	}
+	defer file.Close()
+
+	var subsystem uint16
+	switch header := file.OptionalHeader.(type) {
+	case *pe.OptionalHeader32:
+		subsystem = header.Subsystem
+	case *pe.OptionalHeader64:
+		subsystem = header.Subsystem
+	default:
+		return errors.New("PE executable has no supported optional header")
+	}
+	switch subsystem {
+	case 2:
+		fmt.Println("windows-gui")
+	case 3:
+		fmt.Println("windows-cui")
+	default:
+		return fmt.Errorf("unsupported PE subsystem %d", subsystem)
+	}
+	return nil
 }
 
 func printFacts() error {

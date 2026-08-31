@@ -166,7 +166,6 @@ jobs:
           if (-not $env:VCINSTALLDIR) { throw "vcvars64 did not set VCINSTALLDIR" }
           $archive = "dist/AISummoner-Windows-Remote-Engineering-x86_64.zip"
           $mt = (Get-Command mt.exe -ErrorAction Stop).Source
-          $dumpbin = (Get-Command dumpbin.exe -ErrorAction Stop).Source
           $signtool = (Get-Command signtool.exe -ErrorAction Stop).Source
           $windeployqt = (Get-Command windeployqt.exe -ErrorAction Stop).Source
           $qtLicenseRoot = Join-Path $pwd "build/qtbase-license-source/LICENSES"
@@ -179,7 +178,7 @@ jobs:
             "-DGUI_EXECUTABLE=$pwd/build/windows-remote/Release/aisummoner-client-ui.exe" `
             "-DCORE_EXECUTABLE=$pwd/dist/windows-core/aisummoner-client.exe" `
             "-DMT_EXECUTABLE=$mt" `
-            "-DDUMPBIN_EXECUTABLE=$dumpbin" `
+            "-DPE_INSPECTOR_EXECUTABLE=$pwd/dist/windows-contract/windows-contract-probe.exe" `
             "-DSIGNTOOL_EXECUTABLE=$signtool" `
             "-DWINDEPLOYQT_EXECUTABLE=$windeployqt" `
             "-DQT_LICENSE_ROOT=$qtLicenseRoot" `
