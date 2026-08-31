@@ -16,6 +16,7 @@ on:
       - "internal/identity/**"
       - "internal/protocol/**"
       - "internal/remoteclient/**"
+      - "internal/sshclient/**"
       - "internal/sshserver/**"
       - "internal/tunnel/**"
       - "internal/winpipe/**"
