@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 )
 
-//go:embed assets/runtime.patch.yml assets/aisummoner/agent.cordis.yml assets/aisummoner/preset.yml assets/aisummoner/remote-bash.mjs
+//go:embed assets/runtime.patch.yml assets/aisummoner/agent.cordis.yml assets/aisummoner/preset.yml assets/aisummoner/remote-bash.mjs assets/aisummoner-windows/agent.cordis.yml assets/aisummoner-windows/preset.yml assets/aisummoner-windows/remote-bash.mjs
 var runtimeAssets embed.FS
 
 type RuntimeFiles struct {
@@ -26,8 +26,8 @@ func PrepareRuntimeHome(home string) (RuntimeFiles, error) {
 		return RuntimeFiles{}, err
 	}
 	presetRoot := filepath.Join(home, ".agent-presets")
-	presetDir := filepath.Join(presetRoot, AgentPreset)
-	for _, directory := range []string{presetRoot, presetDir} {
+	presetDirs := []string{filepath.Join(presetRoot, AgentPreset), filepath.Join(presetRoot, WindowsAgentPreset)}
+	for _, directory := range append([]string{presetRoot}, presetDirs...) {
 		if err := ensurePrivateDirectory(directory); err != nil {
 			return RuntimeFiles{}, err
 		}
@@ -36,9 +36,12 @@ func PrepareRuntimeHome(home string) (RuntimeFiles, error) {
 		embedded string
 		target   string
 	}{
-		{"assets/aisummoner/agent.cordis.yml", filepath.Join(presetDir, "agent.cordis.yml")},
-		{"assets/aisummoner/preset.yml", filepath.Join(presetDir, "preset.yml")},
-		{"assets/aisummoner/remote-bash.mjs", filepath.Join(presetDir, "remote-bash.mjs")},
+		{"assets/aisummoner/agent.cordis.yml", filepath.Join(presetDirs[0], "agent.cordis.yml")},
+		{"assets/aisummoner/preset.yml", filepath.Join(presetDirs[0], "preset.yml")},
+		{"assets/aisummoner/remote-bash.mjs", filepath.Join(presetDirs[0], "remote-bash.mjs")},
+		{"assets/aisummoner-windows/agent.cordis.yml", filepath.Join(presetDirs[1], "agent.cordis.yml")},
+		{"assets/aisummoner-windows/preset.yml", filepath.Join(presetDirs[1], "preset.yml")},
+		{"assets/aisummoner-windows/remote-bash.mjs", filepath.Join(presetDirs[1], "remote-bash.mjs")},
 		{"assets/runtime.patch.yml", filepath.Join(home, ".aisummoner-runtime.patch.yml")},
 	}
 	for _, file := range files {

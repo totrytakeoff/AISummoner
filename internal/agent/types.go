@@ -96,6 +96,12 @@ type RuntimeSessionAdapter interface {
 	SelectModel(context.Context, string, ModelSelection) (ModelSelection, error)
 }
 
+// TargetRuntimeSessionAdapter optionally lets a Runtime choose a target-aware
+// profile while retaining the legacy PrepareSession contract.
+type TargetRuntimeSessionAdapter interface {
+	PrepareSessionForTarget(context.Context, string, ExecutionTarget) (string, error)
+}
+
 // RuntimeConfigurationAdapter is the optional Host-level provider
 // configuration capability. All returned credential data is structurally
 // value-free; mutations carry a secret only in the write direction.

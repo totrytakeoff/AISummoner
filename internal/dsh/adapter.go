@@ -32,6 +32,7 @@ const (
 
 	CredentialReference = "DEEPSEEK_API_KEY"
 	AgentPreset         = "aisummoner"
+	WindowsAgentPreset  = "aisummoner-windows"
 )
 
 const (
@@ -252,6 +253,16 @@ func (adapter *Adapter) PreflightTurn(ctx context.Context, request agent.RunRequ
 // opaque ID. A new ID is returned to the product Service for owner-scoped
 // persistence before a Turn or model mutation proceeds.
 func (adapter *Adapter) PrepareSession(ctx context.Context, externalID string) (string, error) {
+	return adapter.prepareSession(ctx, externalID, agent.ExecutionTarget{})
+}
+
+// PrepareSessionForTarget selects only a reviewed, bundled preset. The target
+// metadata is supplied by the Server's owner-scoped Device record.
+func (adapter *Adapter) PrepareSessionForTarget(ctx context.Context, externalID string, target agent.ExecutionTarget) (string, error) {
+	return adapter.prepareSession(ctx, externalID, target)
+}
+
+func (adapter *Adapter) prepareSession(ctx context.Context, externalID string, target agent.ExecutionTarget) (string, error) {
 	if externalID == "" {
 		var err error
 		externalID, err = adapter.newID("ses")
@@ -262,7 +273,7 @@ func (adapter *Adapter) PrepareSession(ctx context.Context, externalID string) (
 	if !validExternalSessionID(externalID) {
 		return "", protocolError("invalid persisted DSH session id")
 	}
-	if err := adapter.createOrResume(ctx, externalID); err != nil {
+	if err := adapter.createOrResume(ctx, externalID, target); err != nil {
 		return "", err
 	}
 	return externalID, nil
@@ -273,7 +284,7 @@ func (adapter *Adapter) Run(ctx context.Context, request agent.RunRequest, sink 
 		return protocolError("invalid DSH run request")
 	}
 	newExternalID := request.ExternalSessionID == ""
-	externalID, err := adapter.PrepareSession(ctx, request.ExternalSessionID)
+	externalID, err := adapter.prepareSession(ctx, request.ExternalSessionID, request.Target)
 	if err != nil {
 		return err
 	}
@@ -322,20 +333,26 @@ func (adapter *Adapter) Run(ctx context.Context, request agent.RunRequest, sink 
 	return cleanup(err, err != nil)
 }
 
-func (adapter *Adapter) createOrResume(ctx context.Context, externalID string) error {
+func (adapter *Adapter) createOrResume(ctx context.Context, externalID string, target agent.ExecutionTarget) error {
 	var value struct {
 		SessionID   string `json:"sessionId"`
 		AgentPreset string `json:"agentPreset"`
+	}
+	preset := AgentPreset
+	if target.Platform == "windows" {
+		preset = WindowsAgentPreset
+	} else if target.Platform != "" && target.Platform != "linux" {
+		return protocolError("DSH target platform is unsupported")
 	}
 	err := adapter.call(ctx, "session.create", struct {
 		CWD         string `json:"cwd"`
 		SessionID   string `json:"sessionId"`
 		AgentPreset string `json:"agentPreset"`
-	}{CWD: "/", SessionID: externalID, AgentPreset: AgentPreset}, &value)
+	}{CWD: "/", SessionID: externalID, AgentPreset: preset}, &value)
 	if err != nil {
 		return err
 	}
-	if value.SessionID != externalID || value.AgentPreset != AgentPreset {
+	if value.SessionID != externalID || value.AgentPreset != preset {
 		return protocolError("DSH resumed an unexpected session")
 	}
 	return nil

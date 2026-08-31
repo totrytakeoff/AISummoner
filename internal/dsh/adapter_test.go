@@ -222,7 +222,8 @@ func (fixture *dshFixture) serveHTTP(writer http.ResponseWriter, request *http.R
 		fixture.mu.Lock()
 		fixture.created = append(fixture.created, payload)
 		fixture.mu.Unlock()
-		value = map[string]any{"sessionId": fixture.externalID, "agentPreset": AgentPreset}
+		preset, _ := payload["agentPreset"].(string)
+		value = map[string]any{"sessionId": fixture.externalID, "agentPreset": preset}
 	case "session.prompt":
 		var payload map[string]any
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
@@ -362,9 +363,12 @@ func TestAdapterCreatesOrResumesAndMapsNativeTurn(t *testing.T) {
 	for _, test := range []struct {
 		name       string
 		existingID string
+		target     agent.ExecutionTarget
+		preset     string
 	}{
-		{name: "create"},
-		{name: "resume", existingID: "ses_existing"},
+		{name: "create", preset: AgentPreset},
+		{name: "resume", existingID: "ses_existing", preset: AgentPreset},
+		{name: "windows", target: agent.ExecutionTarget{Platform: "windows", Arch: "amd64"}, preset: WindowsAgentPreset},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			externalID := test.existingID
@@ -399,7 +403,7 @@ func TestAdapterCreatesOrResumesAndMapsNativeTurn(t *testing.T) {
 			defer cancel()
 			err = adapter.Run(ctx, agent.RunRequest{
 				SessionID: "ags_product", ExternalSessionID: test.existingID,
-				UserText: "inspect the selected device", RemoteExec: invoker,
+				UserText: "inspect the selected device", RemoteExec: invoker, Target: test.target,
 			}, sink)
 			if err != nil {
 				t.Fatal(err)
@@ -429,7 +433,7 @@ func TestAdapterCreatesOrResumesAndMapsNativeTurn(t *testing.T) {
 				t.Fatal("event stream worker did not close")
 			}
 			created, prompts, cancels, credential := fixture.snapshot()
-			if len(created) != 1 || created[0]["cwd"] != "/" || created[0]["sessionId"] != externalID || created[0]["agentPreset"] != AgentPreset {
+			if len(created) != 1 || created[0]["cwd"] != "/" || created[0]["sessionId"] != externalID || created[0]["agentPreset"] != test.preset {
 				t.Fatalf("session.create=%#v", created)
 			}
 			if len(prompts) != 1 || prompts[0]["sessionId"] != externalID || prompts[0]["mode"] != "queue" || cancels != 0 || credential != "sk-private-test" {

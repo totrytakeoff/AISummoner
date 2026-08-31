@@ -634,7 +634,13 @@ func (s *Service) StartTurn(ctx context.Context, ownerUserID, sessionID, content
 		externalSessionID = *session.ExternalSessionID
 	}
 	if runtime, supportsRuntimeSession := adapter.(RuntimeSessionAdapter); supportsRuntimeSession {
-		preparedID, prepareErr := runtime.PrepareSession(ctx, externalSessionID)
+		var preparedID string
+		var prepareErr error
+		if targetRuntime, ok := adapter.(TargetRuntimeSessionAdapter); ok {
+			preparedID, prepareErr = targetRuntime.PrepareSessionForTarget(ctx, externalSessionID, ExecutionTarget{Platform: device.Platform, Arch: device.Arch})
+		} else {
+			preparedID, prepareErr = runtime.PrepareSession(ctx, externalSessionID)
+		}
 		if prepareErr != nil {
 			return store.AgentMessage{}, prepareErr
 		}

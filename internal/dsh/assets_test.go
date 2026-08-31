@@ -26,6 +26,13 @@ func TestPrepareRuntimeHomeInstallsPrivateRemoteOnlyPreset(t *testing.T) {
 	for _, path := range expected {
 		assertPathMode(t, path, 0o600, false)
 	}
+	for _, path := range []string{
+		filepath.Join(home, ".agent-presets", WindowsAgentPreset, "agent.cordis.yml"),
+		filepath.Join(home, ".agent-presets", WindowsAgentPreset, "preset.yml"),
+		filepath.Join(home, ".agent-presets", WindowsAgentPreset, "remote-bash.mjs"),
+	} {
+		assertPathMode(t, path, 0o600, false)
+	}
 
 	composition := readAsset(t, expected[1])
 	for _, forbidden := range []string{
