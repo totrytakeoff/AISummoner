@@ -1,7 +1,7 @@
 ---
 task_id: task028
 type: plan
-status: ready_for_implementation
+status: ready_for_review
 from: planner
 to: coder
 revision: 0
@@ -12,7 +12,8 @@ requires_review: true
 
 ## Status
 
-Ready for implementation under the active user goal to complete the native
+Implementation and bounded native CI evidence are complete and ready for human
+review under the active user goal to complete the native
 Windows Remote Client. Task027 is ready for human review; Tasks025-027 retain
 independent-review debt. Advancing this bounded desktop/package slice neither
 fabricates those verdicts nor accepts Proposed ADR-0007.

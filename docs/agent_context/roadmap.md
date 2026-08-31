@@ -98,9 +98,10 @@ updated_by: coder
 - [x] A8.2 task027 (ready for human review): production ConPTY Terminal,
   resize/Ctrl-C and joined cleanup pass the same native chain; the artifact is
   still elevated-runner engineering evidence rather than desktop acceptance.
-- [ ] A8.3 task028 (in progress): prove ordinary-user Qt sibling-Core launch,
+- [x] A8.3 task028 (ready for review): prove ordinary-user Qt sibling-Core launch,
   no console flash, GUI-close daemon survival and a production-shaped
-  engineering ZIP; keep clean-profile and clean-VM evidence distinct.
+  engineering ZIP on the hosted standard-account runner; clean Windows 10/11
+  VM evidence remains open.
 - [ ] A8.4 task029: add the trusted Agent Execution Profile/DSH PowerShell
   path, then sign/package after final public E2E.
 - [ ] Structured Remote file read/search/write/patch/diff.

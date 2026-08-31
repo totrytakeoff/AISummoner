@@ -101,11 +101,11 @@ updated_by: coder
 
 ## Next
 
-- [ ] task028 (implementation in progress): complete the ordinary-user Qt GUI sibling-Core launcher,
-  no-console-flash and GUI-close daemon-survival contracts, then validate the
-  portable engineering package on a clean Windows 11/10 desktop. Windows Agent
-  operations remain fail closed until Task029's trusted Execution Profile and
-  real DSH Turn pass.
+- [x] task028 (ready for review): complete the ordinary-user Qt GUI sibling-Core launcher,
+  no-console-flash and GUI-close daemon-survival contracts, plus the hosted
+  standard-account portable-package proof. Clean Windows 10/11 desktop
+  validation remains open; Windows Agent operations stay fail closed until
+  Task029's trusted Execution Profile and real DSH Turn pass.
 - [ ] Complete Task023's ordinary-user Windows 11/10, wrong-logon and clean-VM
   evidence before accepting or revising Proposed ADR-0007. This validation now
   runs alongside the user-authorized, non-enabling Task024 extraction.
