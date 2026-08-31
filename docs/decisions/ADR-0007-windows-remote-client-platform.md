@@ -171,3 +171,24 @@ Embedded SSHD 全链路通过，并证明 UTF-8 stdout/stderr、cwd、exit statu
 本证据仍不接受 ADR：生产 ConPTY、ordinary-user Windows 11/10、第二 logon、clean VM、GUI
 无 console flash/保活、可信 Agent Execution Profile/真实 DSH Turn 和签名交付尚未完成。
 Git Bash/MSYS2 仍未内置，也不是原生 PowerShell/ConPTY 的替代品。
+
+## Task027 当前证据（2026-08-31）
+
+生产 Windows SSH interactive shell 已使用与 exec 共享的系统 Windows PowerShell 5.1、
+UTF-8 前缀、suspended Job assignment 与 cwd policy，并通过 ConPTY 提供 VT/UTF-8、resize、
+Ctrl-C 和 combined terminal stream。正常 root exit、channel close、context cancel 与 Tunnel
+shutdown 都会终止剩余 Job descendants，关闭并等待 ConPTY/pipe/I/O workers；resize、signal
+和 cleanup 在同一 close-safe 生命周期下幂等执行。
+
+最终证据为
+[run 33363125225](https://github.com/totrytakeoff/AISummoner/actions/runs/33363125225)：
+Windows Server 2022 上的真实 Device challenge、TLS/WSS、yamux、strict SSH client 与生产
+Embedded SSHD 全链路通过，证明中文 UTF-8、Windows cwd、`101x37` resize、Ctrl-C 后继续
+交互，以及四条结束路径的子孙回收和无关进程存活；Task026 exec、Windows vet/Core build、
+Qt CTest/认证 IPC/打包与 Ubuntu normal/race/vet 回归同样通过。artifact `9747422615` 的
+内层工程 ZIP SHA-256 为
+`4d728492f866617a55576b455fed4690677dbe6ae4c18d6571d5fb33be68494f`。
+
+本证据仍不接受 ADR：runner facts 明确为 high-integrity/elevated Session 2，尚缺 ordinary-
+user Windows 11/10、第二 logon、clean VM、GUI sibling Core 无 console flash/关闭保活、可信
+Agent Execution Profile/真实 DSH Turn 和签名交付。Git Bash/MSYS2 仍未内置或设为前置依赖。

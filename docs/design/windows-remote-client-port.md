@@ -50,9 +50,10 @@ Linux daemon、IPC、真实 SSH exec/PTY/进程树回收、Qt CTest 与 GUI+daem
 token/LocalAppData、DPAPI/ACL Identity 和认证 named pipe 接入这些生产 seam；真实
 `aisummoner-client.exe`、Qt→Go IPC 与 Linux normal/race/vet 已在最终 CI 通过，并生成带
 SHA-256 的 unsigned 工程 ZIP。Task026 随后把生产 SSH 非 PTY exec 接到系统 Windows
-PowerShell 5.1、suspended Job assignment 与 joined descendant cleanup，并通过真实
-TLS/WSS→yamux→strict SSH 原生链路。交互 shell 仍明确拒绝，不用 no-op 冒充 ConPTY；下一步
-是 Task027。Windows 仍未成为支持平台，ADR-0007 仍为 Proposed。
+PowerShell 5.1、suspended Job assignment 与 joined descendant cleanup；Task027 又把生产
+ConPTY Terminal 的 VT/UTF-8、cwd、resize、Ctrl-C 与 joined cleanup 接入同一真实
+TLS/WSS→yamux→strict SSH 原生链路。下一步是 Task028 的普通用户 Qt/干净机验收。Windows
+仍未成为支持平台，ADR-0007 仍为 Proposed。
 
 ## Task024 前代码审计
 
@@ -391,6 +392,8 @@ fail closed，Task025-026 的独立 review 继续作为债务记录。**
 ### Task027：ConPTY Terminal
 
 完成 shell、UTF-8/VT、resize、Ctrl-C、断连/pause cleanup 和 Browser xterm 实机测试。
+**生产实现与真实原生链路 CI 已完成，证据已移交人工 review；hosted runner 为 elevated
+Windows Server 2022，因此普通用户桌面/Browser 验收仍归 Task028。**
 
 ### Task028：Qt GUI 与工程 ZIP
 

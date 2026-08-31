@@ -29,10 +29,10 @@ updated_by: coder
   Tunnel shutdown while ConPTY shell and the Windows Agent profile remain fail
   closed. Tasks025-026 retain independent-review debt.
 
-- [ ] task027 (in progress under the active user goal): replace fail-closed
-  Windows interactive shell with production ConPTY, fixed PowerShell 5.1,
-  VT/UTF-8, resize/Ctrl-C and joined Job/pipe/handle cleanup through the real
-  native chain. Task028 GUI and Task029 Agent/release gates remain out of scope.
+- [x] task027 (ready for human review): production Windows ConPTY Terminal now
+  provides fixed PowerShell 5.1, VT/UTF-8, cwd, resize/Ctrl-C and joined Job/
+  pipe/handle cleanup through the real native chain. Task028 GUI and Task029
+  Agent/release gates remain open; no Windows support claim is inferred.
 
 - [ ] task023 (in progress): Windows Server 2022 CI now proves the strict
   Qt↔Go named-pipe path, exact peer-token check, DPAPI/ACL, suspended Job,
@@ -101,7 +101,9 @@ updated_by: coder
 
 ## Next
 
-- [ ] Finish and review task027's production ConPTY Terminal. Windows Agent
+- [ ] task028: complete the ordinary-user Qt GUI sibling-Core launcher,
+  no-console-flash and GUI-close daemon-survival contracts, then validate the
+  portable engineering package on a clean Windows 11/10 desktop. Windows Agent
   operations remain fail closed until Task029's trusted Execution Profile and
   real DSH Turn pass.
 - [ ] Complete Task023's ordinary-user Windows 11/10, wrong-logon and clean-VM

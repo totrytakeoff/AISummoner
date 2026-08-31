@@ -88,10 +88,11 @@ AISummoner is a browser-controlled, server-side Agent and SSH remote execution p
   and SSH execution seams; Task025 connected real Windows LocalAppData/token
   policy, DPAPI/ACL Identity and authenticated named-pipe IPC. Task026 now adds
   production inbox-PowerShell non-PTY exec, suspended Job assignment and joined
-  process-tree cleanup, proven through native TLS/WSS/yamux/strict SSH. ConPTY
-  shell remains explicitly rejected. Ordinary-user Windows 11/10, wrong-logon,
-  clean-VM, real Terminal/Agent and public production E2E remain, so Windows is
-  not yet supported and ADR-0007 remains Proposed.
+  process-tree cleanup. Task027 adds production PowerShell/ConPTY Terminal with
+  VT/UTF-8, cwd, resize, Ctrl-C and joined cleanup, proven through the same
+  native TLS/WSS/yamux/strict SSH chain. Ordinary-user Windows 11/10,
+  wrong-logon, clean-VM GUI launch, real Agent and public production E2E remain,
+  so Windows is not yet supported and ADR-0007 remains Proposed.
 
 ## Constraints
 

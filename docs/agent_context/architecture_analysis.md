@@ -29,8 +29,9 @@ transport and SSH execution backends, and Task025 connected production Windows
 token/LocalAppData, DPAPI/ACL Identity and authenticated named-pipe IPC.
 Task026 then added real inbox-PowerShell non-PTY exec with suspended Job
 assignment and joined descendant cleanup through native TLS/WSS/yamux/strict
-SSH. Interactive shell still fails closed pending production ConPTY. Agent
-target-shell awareness and desktop/E2E proof also remain. The primary product
+SSH. Task027 now adds production PowerShell/ConPTY Terminal with VT/UTF-8,
+resize, Ctrl-C and joined lifecycle through the same native chain. Agent
+target-shell awareness and ordinary-user desktop/E2E proof still remain. The primary product
 debt is the remaining one-Turn lifecycle, incomplete Runtime capabilities and
 the still-unproved Windows execution/platform seam rather than Controller
 chrome.
@@ -152,9 +153,10 @@ not a separate Windows product fork.
 4. Enrich OpenCode, then add Codex and Claude using the same contracts.
 5. Prove the Windows backend contracts and extract the common platform seams.
    **Windows Server 2022 contracts, the Task024 extraction, Task025 native
-   Core/DPAPI/named-pipe implementation and Task026 PowerShell/Job exec are
-   complete.** Implement ConPTY and Qt desktop acceptance next, then add a
-   trusted Agent Execution Profile without weakening Linux behavior.
+   Core/DPAPI/named-pipe implementation, Task026 PowerShell/Job exec and
+   Task027 production ConPTY Terminal are complete.** Prove the ordinary-user
+   Qt desktop/package contract next, then add a trusted Agent Execution Profile
+   without weakening Linux behavior.
 6. Add structured file/diff and Desktop capabilities only through separate ADRs.
 
 Old routes should redirect for at least one migration release. Existing Session
