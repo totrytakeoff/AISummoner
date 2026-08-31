@@ -7,9 +7,19 @@ on:
       - feat/windows-remote-client
     paths:
       - ".github/workflows/windows-remote-contract.yml"
+      - "cmd/aisummoner-client/**"
       - "cmd/windows-contract-probe/**"
       - "desktop/remote-client/**"
       - "deploy/windows-spike/**"
+      - "internal/clientipc/**"
+      - "internal/clientplatform/**"
+      - "internal/identity/**"
+      - "internal/protocol/**"
+      - "internal/remoteclient/**"
+      - "internal/sshserver/**"
+      - "internal/tunnel/**"
+      - "internal/winpipe/**"
+      - "internal/winsecurity/**"
       - "internal/windowsprobe/**"
       - "go.mod"
       - "go.sum"
@@ -27,6 +37,7 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 35
     env:
+      CGO_ENABLED: "0"
       GOMAXPROCS: "2"
       GOFLAGS: "-p=1"
 
@@ -45,7 +56,27 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $PSNativeCommandUseErrorActionPreference = $true
+          go test -buildvcs=false -count=1 -timeout=3m -v `
+            ./internal/winsecurity `
+            ./internal/winpipe `
+            ./internal/clientplatform `
+            ./internal/identity `
+            ./internal/clientipc `
+            ./internal/sshserver
           go test -buildvcs=false -count=1 -timeout=3m -v ./internal/windowsprobe
+          go vet -buildvcs=false `
+            ./internal/winsecurity `
+            ./internal/winpipe `
+            ./internal/clientplatform `
+            ./internal/identity `
+            ./internal/clientipc `
+            ./internal/sshserver `
+            ./internal/remoteclient `
+            ./internal/tunnel `
+            ./cmd/aisummoner-client
+          New-Item -ItemType Directory -Force -Path dist/windows-core | Out-Null
+          go build -buildvcs=false -trimpath `
+            -o dist/windows-core/aisummoner-client.exe ./cmd/aisummoner-client
           New-Item -ItemType Directory -Force -Path dist/windows-contract | Out-Null
           go build -buildvcs=false -trimpath -o dist/windows-contract/windows-contract-probe.exe ./cmd/windows-contract-probe
           & dist/windows-contract/windows-contract-probe.exe --mode facts |
@@ -115,9 +146,10 @@ jobs:
             }
           }
           if (-not $env:VCINSTALLDIR) { throw "vcvars64 did not set VCINSTALLDIR" }
-          $stage = "dist/AISummoner-Windows-Remote-Contract"
+          $stage = "dist/AISummoner-Windows-Remote-Engineering"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item build/windows-remote/Release/aisummoner-client-ui.exe $stage
+          Copy-Item dist/windows-core/aisummoner-client.exe $stage
           Copy-Item build/windows-remote/Release/aisummoner_windows_ipc_probe.exe $stage
           Copy-Item dist/windows-contract/windows-contract-probe.exe $stage
           Copy-Item dist/windows-contract/runner-facts.json $stage
@@ -128,18 +160,18 @@ jobs:
           if (-not (Test-Path $redistributable)) {
             throw "windeployqt omitted the official Visual C++ Redistributable"
           }
-          $archive = "dist/AISummoner-Windows-Remote-Contract-x86_64.zip"
+          $archive = "dist/AISummoner-Windows-Remote-Engineering-x86_64.zip"
           Compress-Archive -Path "$stage/*" -DestinationPath $archive -Force
           (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant() + `
             "  " + (Split-Path -Leaf $archive) |
             Out-File -Encoding ascii "$archive.sha256"
 
-      - name: Upload unsigned contract artifact
+      - name: Upload unsigned engineering artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: AISummoner-Windows-Remote-Contract-x86_64
+          name: AISummoner-Windows-Remote-Engineering-x86_64
           path: |
-            dist/AISummoner-Windows-Remote-Contract-x86_64.zip
-            dist/AISummoner-Windows-Remote-Contract-x86_64.zip.sha256
+            dist/AISummoner-Windows-Remote-Engineering-x86_64.zip
+            dist/AISummoner-Windows-Remote-Engineering-x86_64.zip.sha256
           if-no-files-found: error
           retention-days: 14

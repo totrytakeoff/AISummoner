@@ -8,10 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
-	"unsafe"
 
-	"golang.org/x/sys/windows"
+	"github.com/aisummoner/aisummoner/internal/winsecurity"
 )
 
 var (
@@ -22,49 +20,15 @@ var (
 // ProtectCurrentUser binds plaintext to the current Windows user and machine.
 // The returned blob is safe to persist but remains sensitive application data.
 func ProtectCurrentUser(plaintext []byte) ([]byte, error) {
-	if len(plaintext) == 0 {
-		return nil, errors.New("DPAPI plaintext is empty")
-	}
-	input := dataBlob(plaintext)
-	entropy := dataBlob(dpapiEntropy)
-	description, err := windows.UTF16PtrFromString("AISummoner Remote Device Identity")
-	if err != nil {
-		return nil, err
-	}
-	var output windows.DataBlob
-	if err := windows.CryptProtectData(
-		&input, description, &entropy, 0, nil, windows.CRYPTPROTECT_UI_FORBIDDEN, &output,
-	); err != nil {
-		return nil, fmt.Errorf("protect Device Identity: %w", err)
-	}
-	defer windows.LocalFree(windows.Handle(unsafe.Pointer(output.Data)))
-	protected := append([]byte(nil), unsafe.Slice(output.Data, output.Size)...)
-	runtime.KeepAlive(plaintext)
-	return protected, nil
+	return winsecurity.ProtectCurrentUser(
+		plaintext, dpapiEntropy, "AISummoner Remote Device Identity",
+	)
 }
 
 // UnprotectCurrentUser decrypts and integrity-checks a blob for the current
 // Windows user and machine.
 func UnprotectCurrentUser(protected []byte) ([]byte, error) {
-	if len(protected) == 0 {
-		return nil, errors.New("DPAPI blob is empty")
-	}
-	input := dataBlob(protected)
-	entropy := dataBlob(dpapiEntropy)
-	var output windows.DataBlob
-	var description *uint16
-	if err := windows.CryptUnprotectData(
-		&input, &description, &entropy, 0, nil, windows.CRYPTPROTECT_UI_FORBIDDEN, &output,
-	); err != nil {
-		return nil, fmt.Errorf("unprotect Device Identity: %w", err)
-	}
-	if description != nil {
-		defer windows.LocalFree(windows.Handle(unsafe.Pointer(description)))
-	}
-	defer windows.LocalFree(windows.Handle(unsafe.Pointer(output.Data)))
-	plaintext := append([]byte(nil), unsafe.Slice(output.Data, output.Size)...)
-	runtime.KeepAlive(protected)
-	return plaintext, nil
+	return winsecurity.UnprotectCurrentUser(protected, dpapiEntropy)
 }
 
 // WriteProtectedIdentity proves the production storage sequence: protected
@@ -137,8 +101,4 @@ func ReadProtectedIdentity(path string) ([]byte, error) {
 		return nil, errors.New("invalid protected identity size")
 	}
 	return UnprotectCurrentUser(contents[minimum:])
-}
-
-func dataBlob(contents []byte) windows.DataBlob {
-	return windows.DataBlob{Size: uint32(len(contents)), Data: &contents[0]}
 }
