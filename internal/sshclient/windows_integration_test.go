@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -81,36 +82,37 @@ exit 9
 		t.Fatal("Windows interactive shell succeeded before the ConPTY task")
 	}
 
-	for _, signal := range []ssh.Signal{ssh.Signal("TERM"), ssh.Signal("KILL")} {
-		t.Run("signal_"+string(signal), func(t *testing.T) {
+	for _, signal := range []struct {
+		name       string
+		exitStatus uint32
+	}{{name: "TERM", exitStatus: 143}, {name: "KILL", exitStatus: 137}} {
+		t.Run("signal_"+signal.name, func(t *testing.T) {
 			connection, err := fixture.dialer.dial(context.Background(), fixture.deviceID)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer connection.Close()
-			session, err := connection.client.NewSession()
+			channel, requests, err := connection.client.OpenChannel("session", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer session.Close()
-			if err := session.Start("Start-Sleep -Seconds 120"); err != nil {
-				t.Fatal(err)
+			defer channel.Close()
+			go io.Copy(io.Discard, channel)
+			accepted, err := channel.SendRequest("exec", true, windowsMarshalSSHString("Start-Sleep -Seconds 120"))
+			if err != nil || !accepted {
+				t.Fatalf("Windows exec accepted=%v err=%v", accepted, err)
 			}
-			if signal == ssh.Signal("TERM") {
-				if err := session.Signal(ssh.Signal("INT")); err == nil {
-					t.Fatal("non-PTY Windows INT was accepted")
+			if signal.name == "TERM" {
+				accepted, err = channel.SendRequest("signal", true, windowsMarshalSSHString("INT"))
+				if err != nil || accepted {
+					t.Fatalf("non-PTY Windows INT accepted=%v err=%v", accepted, err)
 				}
 			}
-			if err := session.Signal(signal); err != nil {
-				t.Fatalf("Windows %s was rejected: %v", signal, err)
+			accepted, err = channel.SendRequest("signal", true, windowsMarshalSSHString(signal.name))
+			if err != nil || !accepted {
+				t.Fatalf("Windows %s accepted=%v err=%v", signal.name, accepted, err)
 			}
-			waited := make(chan error, 1)
-			go func() { waited <- session.Wait() }()
-			select {
-			case <-waited:
-			case <-time.After(5 * time.Second):
-				t.Fatalf("Windows %s did not finish the Job", signal)
-			}
+			waitForWindowsExitStatus(t, requests, signal.exitStatus)
 		})
 	}
 
@@ -378,4 +380,34 @@ func windowsMarkerText(output []byte, prefix string) (string, error) {
 		text = text[:end]
 	}
 	return strings.TrimSpace(text), nil
+}
+
+func windowsMarshalSSHString(value string) []byte {
+	payload := make([]byte, 4+len(value))
+	binary.BigEndian.PutUint32(payload, uint32(len(value)))
+	copy(payload[4:], value)
+	return payload
+}
+
+func waitForWindowsExitStatus(t *testing.T, requests <-chan *ssh.Request, want uint32) {
+	t.Helper()
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case request, open := <-requests:
+			if !open {
+				t.Fatal("Windows SSH request stream closed before exit status")
+			}
+			if request.Type != "exit-status" {
+				continue
+			}
+			if len(request.Payload) != 4 || binary.BigEndian.Uint32(request.Payload) != want {
+				t.Fatalf("Windows SSH exit status payload = %v, want %d", request.Payload, want)
+			}
+			return
+		case <-timer.C:
+			t.Fatal("Windows SSH signal did not finish the Job")
+		}
+	}
 }
