@@ -85,7 +85,7 @@ func TestTunnelSSHEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	execResult, err := dialer.Exec(ctx, deviceIdentity.DeviceID, "printf stdout; printf stderr >&2; exit 17", ExecOptions{})
+	execResult, err := dialer.Exec(ctx, deviceIdentity.DeviceID, "printf stdout; printf stderr >&2; exit 17", ExecOptions{Platform: protocol.PlatformLinux})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestTunnelSSHEndToEnd(t *testing.T) {
 		_, execErr := dialer.Exec(
 			execContext, deviceIdentity.DeviceID,
 			"sleep 30 & echo $! > child.pid; wait",
-			ExecOptions{CWD: contextDirectory},
+			ExecOptions{CWD: contextDirectory, Platform: protocol.PlatformLinux},
 		)
 		contextExecDone <- execErr
 	}()
@@ -161,7 +161,7 @@ func TestTunnelSSHEndToEnd(t *testing.T) {
 	directory := t.TempDir()
 	execDone := make(chan error, 1)
 	go func() {
-		_, execErr := dialer.Exec(ctx, deviceIdentity.DeviceID, "sleep 30 & echo $! > child.pid; wait", ExecOptions{CWD: directory})
+		_, execErr := dialer.Exec(ctx, deviceIdentity.DeviceID, "sleep 30 & echo $! > child.pid; wait", ExecOptions{CWD: directory, Platform: protocol.PlatformLinux})
 		execDone <- execErr
 	}()
 	childPID := waitForPIDFile(t, filepath.Join(directory, "child.pid"))

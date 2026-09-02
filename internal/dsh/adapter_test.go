@@ -368,7 +368,10 @@ func TestAdapterCreatesOrResumesAndMapsNativeTurn(t *testing.T) {
 	}{
 		{name: "create", preset: AgentPreset},
 		{name: "resume", existingID: "ses_existing", preset: AgentPreset},
-		{name: "windows", target: agent.ExecutionTarget{Platform: "windows", Arch: "amd64"}, preset: WindowsAgentPreset},
+		{name: "windows", target: agent.ExecutionTarget{
+			Platform: "windows", Arch: "amd64", Shell: agent.ExecutionShellWindowsPowerShell,
+			PathFlavor: agent.PathFlavorWindows, DefaultCWDPolicy: agent.DefaultCWDUserProfile,
+		}, preset: WindowsAgentPreset},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			externalID := test.existingID
@@ -440,6 +443,25 @@ func TestAdapterCreatesOrResumesAndMapsNativeTurn(t *testing.T) {
 				t.Fatalf("prompts=%#v cancels=%d credential matched=%v", prompts, cancels, credential == "sk-private-test")
 			}
 		})
+	}
+}
+
+func TestPresetForTargetFailsClosedOnIncompleteOrUnsupportedProfiles(t *testing.T) {
+	validLinux := agent.ExecutionTarget{
+		Platform: "linux", Arch: "amd64", Shell: agent.ExecutionShellPOSIXUser,
+		PathFlavor: agent.PathFlavorPOSIX, DefaultCWDPolicy: agent.DefaultCWDInherit,
+	}
+	if preset, err := presetForTarget(validLinux); err != nil || preset != AgentPreset {
+		t.Fatalf("Linux preset=%q err=%v", preset, err)
+	}
+	for _, target := range []agent.ExecutionTarget{
+		{Platform: "windows", Arch: "amd64"},
+		{Platform: "windows", Arch: "arm64", Shell: agent.ExecutionShellWindowsPowerShell, PathFlavor: agent.PathFlavorWindows, DefaultCWDPolicy: agent.DefaultCWDUserProfile},
+		{Platform: "darwin", Arch: "amd64"},
+	} {
+		if preset, err := presetForTarget(target); err == nil || preset != "" {
+			t.Fatalf("invalid target=%#v preset=%q err=%v", target, preset, err)
+		}
 	}
 }
 

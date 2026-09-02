@@ -40,6 +40,8 @@ const (
 	FailureExecTimeout     = "REMOTE_EXEC_TIMEOUT"
 	FailureExecCanceled    = "REMOTE_EXEC_CANCELED"
 	FailureExecTransport   = "REMOTE_EXEC_TRANSPORT"
+	FailureInvalidCWD      = "REMOTE_CWD_INVALID"
+	FailurePowerShell      = "REMOTE_POWERSHELL_FAILURE"
 )
 
 const (
@@ -60,6 +62,15 @@ const (
 	MaxBaseURLBytes     = 2048
 	MaxReasoningIDBytes = 64
 	MaxProviderModels   = 256
+)
+
+const (
+	ExecutionShellPOSIXUser         = "posix-user-shell"
+	ExecutionShellWindowsPowerShell = "windows-powershell"
+	PathFlavorPOSIX                 = "posix"
+	PathFlavorWindows               = "windows"
+	DefaultCWDInherit               = "inherit"
+	DefaultCWDUserProfile           = "user-profile"
 )
 
 var (
@@ -123,11 +134,15 @@ type RunRequest struct {
 	Target ExecutionTarget
 }
 
-// ExecutionTarget is value-only metadata for provider adapters. Platform and
-// Arch originate from the authenticated, owner-scoped Device record.
+// ExecutionTarget is value-only metadata derived from the authenticated,
+// owner-scoped Device record. Shell, path flavor and the omitted-cwd policy are
+// Server-owned facts; adapters must never accept replacements from model text.
 type ExecutionTarget struct {
-	Platform string
-	Arch     string
+	Platform         string
+	Arch             string
+	Shell            string
+	PathFlavor       string
+	DefaultCWDPolicy string
 }
 
 // CredentialStatus is the value-free provider credential projection shared by
@@ -277,7 +292,7 @@ type RemoteExecArguments struct {
 // production implementation will use strict SSH; tests inject a deterministic
 // fake. Device selection is supplied by the Service, never by the Adapter.
 type RemoteExecutor interface {
-	Exec(ctx context.Context, deviceID, command, cwd string) (RemoteExecution, error)
+	Exec(ctx context.Context, deviceID string, target ExecutionTarget, command, cwd string) (RemoteExecution, error)
 }
 
 type RemoteExecution struct {

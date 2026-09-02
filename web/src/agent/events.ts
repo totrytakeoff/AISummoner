@@ -62,6 +62,8 @@ const turnFailureMessages: Record<string, string> = {
   REMOTE_EXEC_CANCELED: '远程命令已取消。',
   REMOTE_EXEC_TIMEOUT: '远程命令执行超时。',
   REMOTE_EXEC_TRANSPORT: '远程命令通道异常。',
+  REMOTE_CWD_INVALID: '远程工作目录无效，请使用被控设备对应平台的绝对路径。',
+  REMOTE_POWERSHELL_FAILURE: 'Windows PowerShell 未能启动远程命令。',
   APPROVAL_TIMEOUT: '命令审批已超时。',
   credential_required: '尚未配置 DeepSeek API 密钥，请先在设置中完成配置。',
 }
@@ -385,6 +387,10 @@ export function timelineTools(state: AgentViewState): ToolCallView[] {
 
 function snapshotTool(tool: AgentToolCall): ToolCallView {
   const argumentsValue = toolArguments({ arguments_json: tool.arguments_json })
+  const excerpt = tool.output_excerpt ?? ''
+  const persistedFailureCode = (tool.status === 'failed' || tool.status === 'denied') && turnFailureMessages[excerpt]
+    ? excerpt
+    : undefined
   return {
     id: tool.id,
     name: tool.name,
@@ -393,8 +399,10 @@ function snapshotTool(tool: AgentToolCall): ToolCallView {
     timeoutMs: numberValue(argumentsValue, 'timeout_ms'),
     status: tool.status,
     decision: tool.decision ?? undefined,
-    output: tool.output_excerpt ?? '',
+    output: persistedFailureCode ? '' : excerpt,
     exitCode: tool.exit_code ?? undefined,
+    denied: tool.status === 'denied',
+    failureCode: persistedFailureCode,
   }
 }
 

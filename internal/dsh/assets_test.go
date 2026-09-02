@@ -57,9 +57,18 @@ func TestPrepareRuntimeHomeInstallsPrivateRemoteOnlyPreset(t *testing.T) {
 		EnvBridgeURL,
 		EnvBridgeSecret,
 		"redirect: 'error'",
+		"REMOTE_CWD_INVALID",
+		"REMOTE_POWERSHELL_FAILURE",
+		"REMOTE_EXEC_TIMEOUT",
 	} {
 		if !strings.Contains(tool, required) {
 			t.Fatalf("remote tool is missing %q", required)
+		}
+	}
+	windowsComposition := readAsset(t, filepath.Join(home, ".agent-presets", WindowsAgentPreset, "agent.cordis.yml"))
+	for _, required := range []string{"Windows PowerShell 5.1", "Windows absolute paths", "complete: true", "includeRuntimeContext: false"} {
+		if !strings.Contains(windowsComposition, required) {
+			t.Fatalf("Windows DSH composition is missing %q", required)
 		}
 	}
 	for _, forbidden := range []string{"child_process", "execSync", "spawn(", "device_id"} {

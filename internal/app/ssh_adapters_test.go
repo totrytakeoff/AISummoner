@@ -56,12 +56,12 @@ func TestRemoteExecutorMapsCaptureSentinelAndResult(t *testing.T) {
 	ctx := context.WithValue(context.Background(), contextValue, "preserved")
 	executor := &remoteExecutor{exec: func(actualCtx context.Context, deviceID, command string, options sshclient.ExecOptions) (sshclient.ExecResult, error) {
 		if actualCtx.Value(contextValue) != "preserved" || deviceID != "dev_one" || command != "uname -a" ||
-			options.CWD != "/var/tmp" || options.CaptureLimit != agent.MaxToolOutputBytes+1 {
+			options.CWD != "/var/tmp" || options.CaptureLimit != agent.MaxToolOutputBytes+1 || options.Platform != "linux" {
 			t.Fatalf("SSH Exec mapping = ctx=%v device=%q command=%q options=%+v", actualCtx, deviceID, command, options)
 		}
 		return sshclient.ExecResult{Stdout: []byte("out"), Stderr: []byte("err"), ExitCode: 17}, nil
 	}}
-	result, err := executor.Exec(ctx, "dev_one", "uname -a", "/var/tmp")
+	result, err := executor.Exec(ctx, "dev_one", agent.ExecutionTarget{Platform: "linux", Shell: agent.ExecutionShellPOSIXUser}, "uname -a", "/var/tmp")
 	if err != nil || string(result.Stdout) != "out" || string(result.Stderr) != "err" || result.ExitCode != 17 {
 		t.Fatalf("Agent execution mapping = %+v, %v", result, err)
 	}
@@ -91,7 +91,7 @@ func TestRemoteExecutorCaptureSentinelBecomesAgentTruncation(t *testing.T) {
 	sourceCalled := false
 	executor := &remoteExecutor{exec: func(_ context.Context, gotDeviceID, command string, options sshclient.ExecOptions) (sshclient.ExecResult, error) {
 		sourceCalled = true
-		if gotDeviceID != deviceID || command != "large" || options.CaptureLimit != agent.MaxToolOutputBytes+1 {
+		if gotDeviceID != deviceID || command != "large" || options.CaptureLimit != agent.MaxToolOutputBytes+1 || options.Platform != "linux" {
 			t.Fatalf("SSH execution boundary = device=%q command=%q options=%+v", gotDeviceID, command, options)
 		}
 		return sshclient.ExecResult{
@@ -131,9 +131,49 @@ func TestRemoteExecutorPreservesTransportError(t *testing.T) {
 	executor := &remoteExecutor{exec: func(context.Context, string, string, sshclient.ExecOptions) (sshclient.ExecResult, error) {
 		return sshclient.ExecResult{}, sentinel
 	}}
-	result, err := executor.Exec(context.Background(), "dev_one", "true", "")
+	result, err := executor.Exec(context.Background(), "dev_one", agent.ExecutionTarget{Platform: "linux", Shell: agent.ExecutionShellPOSIXUser}, "true", "")
 	if !errors.Is(err, sentinel) || len(result.Stdout) != 0 || len(result.Stderr) != 0 || result.ExitCode != 0 {
 		t.Fatalf("transport error mapping = %+v, %v", result, err)
+	}
+}
+
+func TestRemoteExecutorClassifiesTargetSpecificValidationAndStartFailures(t *testing.T) {
+	tests := []struct {
+		name     string
+		target   agent.ExecutionTarget
+		source   error
+		wantCode string
+	}{
+		{
+			name: "Windows cwd", target: agent.ExecutionTarget{Platform: "windows", Shell: agent.ExecutionShellWindowsPowerShell},
+			source: sshclient.ErrInvalidCWD, wantCode: agent.FailureInvalidCWD,
+		},
+		{
+			name: "PowerShell start", target: agent.ExecutionTarget{Platform: "windows", Shell: agent.ExecutionShellWindowsPowerShell},
+			source: sshclient.ErrRemoteExecStart, wantCode: agent.FailurePowerShell,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			executor := &remoteExecutor{exec: func(context.Context, string, string, sshclient.ExecOptions) (sshclient.ExecResult, error) {
+				return sshclient.ExecResult{}, test.source
+			}}
+			_, err := executor.Exec(context.Background(), "dev_one", test.target, "Get-Location", `C:\Users\Alice`)
+			var executionError *agent.ExecutionError
+			if !errors.As(err, &executionError) || executionError.Code != test.wantCode || !errors.Is(err, test.source) {
+				t.Fatalf("classified error=%v want code=%q source=%v", err, test.wantCode, test.source)
+			}
+		})
+	}
+
+	sentinel := errors.New("Linux start sentinel")
+	executor := &remoteExecutor{exec: func(context.Context, string, string, sshclient.ExecOptions) (sshclient.ExecResult, error) {
+		return sshclient.ExecResult{}, sentinel
+	}}
+	_, err := executor.Exec(context.Background(), "dev_one", agent.ExecutionTarget{Platform: "linux", Shell: agent.ExecutionShellPOSIXUser}, "true", "/tmp")
+	var executionError *agent.ExecutionError
+	if !errors.Is(err, sentinel) || errors.As(err, &executionError) {
+		t.Fatalf("Linux transport error was target-reclassified: %v", err)
 	}
 }
 

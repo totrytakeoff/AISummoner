@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -403,6 +402,14 @@ func (s *Service) prepareRuntimeSession(ctx context.Context, ownerUserID, sessio
 	if err != nil {
 		return nil, "", nil, mapStoreNotFound(err)
 	}
+	device, err := s.store.DeviceByOwner(ctx, ownerUserID, session.DeviceID)
+	if err != nil {
+		return nil, "", nil, mapStoreNotFound(err)
+	}
+	target, err := executionTarget(device.Platform, device.Arch)
+	if err != nil {
+		return nil, "", nil, err
+	}
 	adapter, ok := s.adapterForProvider(session.Provider)
 	if !ok {
 		return nil, "", nil, &AdapterError{Code: "provider_unavailable", Err: errors.New("agent provider is unavailable")}
@@ -419,7 +426,7 @@ func (s *Service) prepareRuntimeSession(ctx context.Context, ownerUserID, sessio
 	if session.ExternalSessionID != nil {
 		externalID = *session.ExternalSessionID
 	}
-	preparedID, err := runtime.PrepareSession(ctx, externalID)
+	preparedID, err := prepareAdapterSession(ctx, runtime, externalID, target)
 	if err != nil {
 		release()
 		return nil, "", nil, err
@@ -435,6 +442,13 @@ func (s *Service) prepareRuntimeSession(ctx context.Context, ownerUserID, sessio
 		}
 	}
 	return runtime, preparedID, release, nil
+}
+
+func prepareAdapterSession(ctx context.Context, runtime RuntimeSessionAdapter, externalID string, target ExecutionTarget) (string, error) {
+	if targetRuntime, ok := runtime.(TargetRuntimeSessionAdapter); ok {
+		return targetRuntime.PrepareSessionForTarget(ctx, externalID, target)
+	}
+	return runtime.PrepareSession(ctx, externalID)
 }
 
 func (s *Service) reserveSessionConfiguration(sessionID string) error {
@@ -617,6 +631,10 @@ func (s *Service) StartTurn(ctx context.Context, ownerUserID, sessionID, content
 	if err != nil {
 		return store.AgentMessage{}, mapStoreNotFound(err)
 	}
+	target, err := executionTarget(device.Platform, device.Arch)
+	if err != nil {
+		return store.AgentMessage{}, err
+	}
 	turnCtx, cancel := context.WithTimeout(s.rootCtx, s.turnTimeout)
 	if err := s.reserveTurn(session, ownerUserID, cancel); err != nil {
 		cancel()
@@ -634,13 +652,7 @@ func (s *Service) StartTurn(ctx context.Context, ownerUserID, sessionID, content
 		externalSessionID = *session.ExternalSessionID
 	}
 	if runtime, supportsRuntimeSession := adapter.(RuntimeSessionAdapter); supportsRuntimeSession {
-		var preparedID string
-		var prepareErr error
-		if targetRuntime, ok := adapter.(TargetRuntimeSessionAdapter); ok {
-			preparedID, prepareErr = targetRuntime.PrepareSessionForTarget(ctx, externalSessionID, ExecutionTarget{Platform: device.Platform, Arch: device.Arch})
-		} else {
-			preparedID, prepareErr = runtime.PrepareSession(ctx, externalSessionID)
-		}
+		preparedID, prepareErr := prepareAdapterSession(ctx, runtime, externalSessionID, target)
 		if prepareErr != nil {
 			return store.AgentMessage{}, prepareErr
 		}
@@ -654,8 +666,7 @@ func (s *Service) StartTurn(ctx context.Context, ownerUserID, sessionID, content
 			externalSessionID = preparedID
 		}
 	}
-	request := RunRequest{SessionID: session.ID, ExternalSessionID: externalSessionID, UserText: content,
-		Target: ExecutionTarget{Platform: device.Platform, Arch: device.Arch}}
+	request := RunRequest{SessionID: session.ID, ExternalSessionID: externalSessionID, UserText: content, Target: target}
 	if preflight, supportsPreflight := adapter.(TurnPreflighter); supportsPreflight {
 		if err := preflight.PreflightTurn(ctx, request); err != nil {
 			return store.AgentMessage{}, err
@@ -689,7 +700,7 @@ func (s *Service) StartTurn(ctx context.Context, ownerUserID, sessionID, content
 		return store.AgentMessage{}, mapStoreNotFound(err)
 	}
 	reserved = false
-	go s.runTurn(turnCtx, cancel, session, message)
+	go s.runTurn(turnCtx, cancel, session, message, target)
 	return message, nil
 }
 
@@ -737,12 +748,11 @@ func (s *Service) releaseTurn(sessionID string) {
 	s.turns.Done()
 }
 
-func (s *Service) runTurn(ctx context.Context, cancel context.CancelFunc, session store.AgentSession, message store.AgentMessage) {
+func (s *Service) runTurn(ctx context.Context, cancel context.CancelFunc, session store.AgentSession, message store.AgentMessage, target ExecutionTarget) {
 	defer cancel()
 	defer s.releaseTurn(session.ID)
 	s.publish(session.ID, EventSessionState, map[string]any{"state": store.AgentSessionRunning})
 	sink := &turnSink{service: s, ownerUserID: session.UserID, sessionID: session.ID}
-	invoker := newTurnInvoker(s, &session)
 	adapter, ok := s.adapterForProvider(session.Provider)
 	if !ok {
 		s.failTurn(session, "provider_unavailable")
@@ -759,17 +769,11 @@ func (s *Service) runTurn(ctx context.Context, cancel context.CancelFunc, sessio
 		}
 		return
 	}
-	device, deviceErr := s.store.DeviceByOwner(ctx, session.UserID, session.DeviceID)
-	if deviceErr != nil {
-		if !s.isRevoked(session.ID) {
-			s.failTurn(session, "DEVICE_NOT_FOUND")
-		}
-		return
-	}
+	invoker := newTurnInvoker(s, &session, target)
 	err := adapter.Run(ctx, RunRequest{
 		SessionID: session.ID, ExternalSessionID: externalSessionID,
 		UserText: message.Content, History: conversationHistory(snapshot.Messages), RemoteExec: invoker,
-		Target: ExecutionTarget{Platform: device.Platform, Arch: device.Arch},
+		Target: target,
 	}, sink)
 	if err == nil {
 		err = ctx.Err()
@@ -1179,13 +1183,15 @@ func (sink *turnSink) SetExternalSessionID(ctx context.Context, externalSessionI
 type turnInvoker struct {
 	service *Service
 	session *store.AgentSession
+	target  ExecutionTarget
 	gate    chan struct{}
 }
 
-func newTurnInvoker(service *Service, session *store.AgentSession) *turnInvoker {
+func newTurnInvoker(service *Service, session *store.AgentSession, target ExecutionTarget) *turnInvoker {
 	return &turnInvoker{
 		service: service,
 		session: session,
+		target:  target,
 		gate:    make(chan struct{}, 1),
 	}
 }
@@ -1269,10 +1275,13 @@ func (invoker *turnInvoker) Invoke(ctx context.Context, request ToolRequest) (To
 			return ToolResult{}, err
 		}
 		if decision == DecisionDeny {
-			excerpt := "command denied by user"
+			excerpt := FailureCommandDenied
 			terminalStatus, terminalErr := invoker.service.finishTool(invoker.session, toolCallID, store.ToolCallDenied, nil, excerpt)
 			if terminalStatus != "" {
-				invoker.service.publish(invoker.session.ID, EventToolCompleted, map[string]any{"tool_call_id": toolCallID, "status": terminalStatus})
+				invoker.service.publish(invoker.session.ID, EventToolCompleted, map[string]any{
+					"tool_call_id": toolCallID, "status": terminalStatus, "denied": true,
+					"failure": ToolFailure{Code: FailureCommandDenied, Message: "command denied by user"},
+				})
 			}
 			if terminalErr != nil {
 				return ToolResult{}, terminalErr
@@ -1304,13 +1313,17 @@ func (invoker *turnInvoker) Invoke(ctx context.Context, request ToolRequest) (To
 	invoker.service.publish(invoker.session.ID, EventToolStarted, map[string]any{
 		"tool_call_id": toolCallID, "name": ToolRemoteExec, "arguments": arguments,
 	})
-	result, execErr := invoker.service.execute(ctx, *invoker.session, arguments)
+	result, execErr := invoker.service.execute(ctx, *invoker.session, invoker.target, arguments)
 	result.ToolCallID = toolCallID
 	excerpt := outputExcerpt(result)
 	if execErr != nil {
 		terminalStatus, terminalErr := invoker.service.finishTool(invoker.session, toolCallID, store.ToolCallFailed, nil, excerpt)
 		if terminalStatus != "" {
-			invoker.service.publish(invoker.session.ID, EventToolCompleted, map[string]any{"tool_call_id": toolCallID, "status": terminalStatus})
+			invoker.service.publish(invoker.session.ID, EventToolCompleted, map[string]any{
+				"tool_call_id": toolCallID, "status": terminalStatus,
+				"stdout": result.Stdout, "stderr": result.Stderr, "exit_code": result.ExitCode,
+				"truncated": result.Truncated, "denied": result.Denied, "failure": result.Failure,
+			})
 		}
 		if terminalErr != nil {
 			return ToolResult{}, terminalErr
@@ -1325,7 +1338,7 @@ func (invoker *turnInvoker) Invoke(ctx context.Context, request ToolRequest) (To
 		// Device/transport failures are structured tool results for the Adapter.
 		// The provider may use them to explain or recover. Parent Turn cancellation,
 		// overall timeout, invalid state and limits still stop the Turn promptly.
-		if result.Failure != nil && !errors.Is(execErr, context.Canceled) && !errors.Is(execErr, context.DeadlineExceeded) {
+		if result.Failure != nil && ctx.Err() == nil {
 			return result, nil
 		}
 		return result, execErr
@@ -1522,7 +1535,7 @@ func (s *Service) finishTool(session *store.AgentSession, toolCallID, desiredSta
 	return "", fmt.Errorf("tool terminal persistence failed: %w", lastErr)
 }
 
-func (s *Service) execute(ctx context.Context, session store.AgentSession, arguments RemoteExecArguments) (ToolResult, error) {
+func (s *Service) execute(ctx context.Context, session store.AgentSession, target ExecutionTarget, arguments RemoteExecArguments) (ToolResult, error) {
 	if s.beforeExecute != nil {
 		s.beforeExecute(ctx)
 	}
@@ -1548,7 +1561,7 @@ func (s *Service) execute(ctx context.Context, session store.AgentSession, argum
 	timeout := time.Duration(arguments.TimeoutMS) * time.Millisecond
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	execution, err := s.executor.Exec(execCtx, session.DeviceID, arguments.Command, arguments.CWD)
+	execution, err := s.executor.Exec(execCtx, session.DeviceID, target, arguments.Command, arguments.CWD)
 	if err != nil {
 		code := FailureExecTransport
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(execCtx.Err(), context.DeadlineExceeded) {
@@ -1590,7 +1603,10 @@ func parseRemoteExecArguments(raw json.RawMessage) (RemoteExecArguments, error) 
 	if !utf8.ValidString(arguments.Command) || len(arguments.Command) == 0 || len([]byte(arguments.Command)) > MaxCommandBytes || strings.IndexByte(arguments.Command, 0) >= 0 {
 		return RemoteExecArguments{}, ErrInvalidTool
 	}
-	if arguments.CWD != "" && (!utf8.ValidString(arguments.CWD) || len([]byte(arguments.CWD)) > MaxCWDBytes || !filepath.IsAbs(arguments.CWD) || strings.IndexByte(arguments.CWD, 0) >= 0) {
+	// Path absoluteness is target-specific and is validated at the trusted
+	// RemoteExecutor/SSH boundary. In particular, a Linux Server must not apply
+	// filepath.IsAbs to a Windows Device path.
+	if arguments.CWD != "" && (!utf8.ValidString(arguments.CWD) || len([]byte(arguments.CWD)) > MaxCWDBytes || strings.IndexByte(arguments.CWD, 0) >= 0) {
 		return RemoteExecArguments{}, ErrInvalidTool
 	}
 	timeoutMS := int(DefaultExecTimeout.Milliseconds())
@@ -1742,6 +1758,10 @@ func safeTurnFailureMessage(code string) string {
 		return "Remote command timed out."
 	case FailureExecCanceled:
 		return "Agent turn was canceled."
+	case FailureInvalidCWD:
+		return "The remote working directory is invalid."
+	case FailurePowerShell:
+		return "Windows PowerShell could not start the remote command."
 	default:
 		return "Agent turn failed."
 	}

@@ -43,15 +43,25 @@ type runtimeSessionProbe struct {
 	runRelease     <-chan struct{}
 	runOnce        sync.Once
 
-	prepareIDs []string
-	modelIDs   []string
-	selections []ModelSelection
-	runs       []RunRequest
+	prepareIDs     []string
+	prepareTargets []ExecutionTarget
+	modelIDs       []string
+	selections     []ModelSelection
+	runs           []RunRequest
 }
 
 func (probe *runtimeSessionProbe) PrepareSession(ctx context.Context, externalID string) (string, error) {
+	return probe.prepareSession(ctx, externalID, ExecutionTarget{})
+}
+
+func (probe *runtimeSessionProbe) PrepareSessionForTarget(ctx context.Context, externalID string, target ExecutionTarget) (string, error) {
+	return probe.prepareSession(ctx, externalID, target)
+}
+
+func (probe *runtimeSessionProbe) prepareSession(ctx context.Context, externalID string, target ExecutionTarget) (string, error) {
 	probe.mu.Lock()
 	probe.prepareIDs = append(probe.prepareIDs, externalID)
+	probe.prepareTargets = append(probe.prepareTargets, target)
 	probe.mu.Unlock()
 	if probe.prepareEntered != nil {
 		probe.prepareOnce.Do(func() { close(probe.prepareEntered) })
@@ -104,10 +114,10 @@ func (probe *runtimeSessionProbe) Run(ctx context.Context, request RunRequest, s
 	return sink.TextDelta(ctx, "runtime response")
 }
 
-func (probe *runtimeSessionProbe) snapshot() (prepareIDs, modelIDs []string, selections []ModelSelection, runs []RunRequest) {
+func (probe *runtimeSessionProbe) snapshot() (prepareIDs []string, prepareTargets []ExecutionTarget, modelIDs []string, selections []ModelSelection, runs []RunRequest) {
 	probe.mu.Lock()
 	defer probe.mu.Unlock()
-	return append([]string(nil), probe.prepareIDs...), append([]string(nil), probe.modelIDs...),
+	return append([]string(nil), probe.prepareIDs...), append([]ExecutionTarget(nil), probe.prepareTargets...), append([]string(nil), probe.modelIDs...),
 		append([]ModelSelection(nil), probe.selections...), append([]RunRequest(nil), probe.runs...)
 }
 
@@ -268,6 +278,7 @@ func (capture *auditCapture) CreateAuditEvent(_ context.Context, event store.Aud
 
 type executionCall struct {
 	deviceID string
+	target   ExecutionTarget
 	command  string
 	cwd      string
 }
@@ -283,9 +294,9 @@ type testExecutor struct {
 	enterOnce    sync.Once
 }
 
-func (executor *testExecutor) Exec(ctx context.Context, deviceID, command, cwd string) (RemoteExecution, error) {
+func (executor *testExecutor) Exec(ctx context.Context, deviceID string, target ExecutionTarget, command, cwd string) (RemoteExecution, error) {
 	executor.mu.Lock()
-	executor.calls = append(executor.calls, executionCall{deviceID: deviceID, command: command, cwd: cwd})
+	executor.calls = append(executor.calls, executionCall{deviceID: deviceID, target: target, command: command, cwd: cwd})
 	result := executor.results[command]
 	err := executor.err
 	executor.mu.Unlock()
@@ -602,7 +613,7 @@ func TestToolValidationLimitTruncationAndTimeout(t *testing.T) {
 		return err
 	}
 	for _, body := range []string{
-		`{"command":""}`, `{"command":"ok","cwd":"relative"}`, `{"command":"ok","timeout_ms":999}`,
+		`{"command":""}`, `{"command":"ok","timeout_ms":999}`,
 		`{"command":"ok","timeout_ms":60001}`, `{"command":"ok","unknown":true}`,
 	} {
 		if err := valid(body); !errors.Is(err, ErrInvalidTool) {
@@ -611,6 +622,13 @@ func TestToolValidationLimitTruncationAndTimeout(t *testing.T) {
 	}
 	if err := valid(`{"command":"ok","cwd":"/tmp","timeout_ms":1000}`); err != nil {
 		t.Fatal(err)
+	}
+	for _, cwd := range []string{"relative", `C:\Users\Alice`, `\\server\share`} {
+		raw, _ := json.Marshal(map[string]any{"command": "ok", "cwd": cwd})
+		parsed, err := parseRemoteExecArguments(raw)
+		if err != nil || parsed.CWD != cwd {
+			t.Fatalf("target-neutral parser rejected cwd %q: %#v, %v", cwd, parsed, err)
+		}
 	}
 	exactCommand := strings.Repeat("c", MaxCommandBytes)
 	exactCWD := "/" + strings.Repeat("d", MaxCWDBytes-1)
@@ -1240,6 +1258,11 @@ func TestFailureLogAndAuditRedaction(t *testing.T) {
 	fixture.service.auditor = audits
 	fixture.executor.err = errors.New(secretOutput)
 	session := fixture.createSession(store.AgentApprovalFullAccess)
+	events, unsubscribe, err := fixture.service.Subscribe(context.Background(), fixture.ownerID, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unsubscribe()
 	_, _ = fixture.service.StartTurn(context.Background(), fixture.ownerID, session.ID, "fail")
 	waitSnapshot(t, fixture.service, fixture.ownerID, session.ID, store.AgentSessionFailed)
 	waitTurnReleased(t, fixture.service, session.ID)
@@ -1259,6 +1282,18 @@ func TestFailureLogAndAuditRedaction(t *testing.T) {
 	}
 	if !foundFailure {
 		t.Fatalf("tool failure audit missing: %#v", audits.events)
+	}
+	foundEvent := false
+	for !foundEvent {
+		select {
+		case event := <-events:
+			if event.Type == EventToolCompleted && bytes.Contains(event.Payload, []byte(`"code":"REMOTE_EXEC_TRANSPORT"`)) &&
+				!bytes.Contains(event.Payload, []byte(secretCommand)) && !bytes.Contains(event.Payload, []byte(secretOutput)) {
+				foundEvent = true
+			}
+		case <-time.After(time.Second):
+			t.Fatal("structured tool failure event missing")
+		}
 	}
 }
 
@@ -1715,11 +1750,111 @@ func TestRuntimeSessionModelsPersistOpaqueIDAndSelectionFeedsTheNextTurn(t *test
 		t.Fatal(err)
 	}
 	waitSnapshot(t, fixture.service, fixture.ownerID, session.ID, store.AgentSessionIdle)
-	prepareIDs, modelIDs, selections, runs := adapter.snapshot()
+	prepareIDs, prepareTargets, modelIDs, selections, runs := adapter.snapshot()
+	wantTarget, err := executionTarget("linux", "amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(prepareIDs) != 3 || prepareIDs[0] != "" || prepareIDs[1] != "ses_service_models" || prepareIDs[2] != "ses_service_models" ||
+		len(prepareTargets) != 3 || prepareTargets[0] != wantTarget || prepareTargets[1] != wantTarget || prepareTargets[2] != wantTarget ||
 		len(modelIDs) != 2 || modelIDs[0] != "ses_service_models" || modelIDs[1] != "ses_service_models" ||
-		len(selections) != 1 || selections[0] != selection || len(runs) != 1 || runs[0].ExternalSessionID != "ses_service_models" {
-		t.Fatalf("prepare=%v models=%v selections=%#v runs=%#v", prepareIDs, modelIDs, selections, runs)
+		len(selections) != 1 || selections[0] != selection || len(runs) != 1 || runs[0].ExternalSessionID != "ses_service_models" || runs[0].Target != wantTarget {
+		t.Fatalf("prepare=%v targets=%#v models=%v selections=%#v runs=%#v", prepareIDs, prepareTargets, modelIDs, selections, runs)
+	}
+}
+
+func TestRuntimeSessionModelsAndTurnUseOneTrustedWindowsTarget(t *testing.T) {
+	adapter := &runtimeSessionProbe{}
+	fixture := newServiceFixture(t, adapter, time.Second, nil)
+	device, err := fixture.store.DeviceByOwner(context.Background(), fixture.ownerID, fixture.deviceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device.Platform = "windows"
+	device.Arch = "amd64"
+	if _, err := fixture.store.RegisterDevice(context.Background(), device); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.SetAdapter(ProviderDSH, adapter); err != nil {
+		t.Fatal(err)
+	}
+	session := fixture.createSession(store.AgentApprovalFullAccess)
+	if _, err := fixture.service.SessionModels(context.Background(), fixture.ownerID, session.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.service.StartTurn(context.Background(), fixture.ownerID, session.ID, "inspect Windows"); err != nil {
+		t.Fatal(err)
+	}
+	waitSnapshot(t, fixture.service, fixture.ownerID, session.ID, store.AgentSessionIdle)
+
+	_, targets, _, _, runs := adapter.snapshot()
+	want, err := executionTarget("windows", "amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 2 || targets[0] != want || targets[1] != want || len(runs) != 1 || runs[0].Target != want {
+		t.Fatalf("Windows targets=%#v runs=%#v want=%#v", targets, runs, want)
+	}
+}
+
+func TestRemoteExecutorReceivesTheSameTrustedWindowsTargetAsAdapter(t *testing.T) {
+	results := make(chan ToolResult, 1)
+	adapter := adapterFunc(func(ctx context.Context, request RunRequest, _ EventSink) error {
+		arguments, err := json.Marshal(RemoteExecArguments{
+			Command: "Get-Location", CWD: `C:\Users\Alice`, TimeoutMS: 30_000,
+		})
+		if err != nil {
+			return err
+		}
+		result, err := request.RemoteExec.Invoke(ctx, ToolRequest{Name: ToolRemoteExec, Arguments: arguments})
+		if err == nil {
+			results <- result
+		}
+		return err
+	})
+	fixture := newServiceFixture(t, adapter, time.Second, nil)
+	device, err := fixture.store.DeviceByOwner(context.Background(), fixture.ownerID, fixture.deviceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device.Platform, device.Arch = "windows", "amd64"
+	if _, err := fixture.store.RegisterDevice(context.Background(), device); err != nil {
+		t.Fatal(err)
+	}
+	session := fixture.createSession(store.AgentApprovalFullAccess)
+	if _, err := fixture.service.StartTurn(context.Background(), fixture.ownerID, session.ID, "locate repository"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case result := <-results:
+		if result.ExitCode != 0 {
+			t.Fatalf("remote result=%#v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Windows remote tool did not finish")
+	}
+	want, err := executionTarget("windows", "amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.executor.mu.Lock()
+	calls := append([]executionCall(nil), fixture.executor.calls...)
+	fixture.executor.mu.Unlock()
+	if len(calls) != 1 || calls[0].target != want || calls[0].cwd != `C:\Users\Alice` || calls[0].deviceID != fixture.deviceID {
+		t.Fatalf("Windows executor calls=%#v want target=%#v", calls, want)
+	}
+	waitSnapshot(t, fixture.service, fixture.ownerID, session.ID, store.AgentSessionIdle)
+}
+
+func TestExecutionTargetRejectsUnsupportedPlatformAndWindowsArchitecture(t *testing.T) {
+	for _, input := range []struct{ platform, arch string }{
+		{platform: "darwin", arch: "amd64"},
+		{platform: "windows", arch: "arm64"},
+		{platform: "linux", arch: ""},
+	} {
+		if _, err := executionTarget(input.platform, input.arch); !errors.Is(err, ErrInvalidState) {
+			t.Fatalf("executionTarget(%q, %q) error=%v", input.platform, input.arch, err)
+		}
 	}
 }
 

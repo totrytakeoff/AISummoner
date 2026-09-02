@@ -155,4 +155,20 @@ describe('Agent event projection', () => {
       : item.kind === 'tool' ? item.tool.command : item.reasoning.content))
       .toEqual(['Inspect', 'hostname', 'Done'])
   })
+
+  it('restores a persisted stable tool failure as an error instead of command output', () => {
+    const state = projectAgentSnapshot({
+      session: { id: 'ags_failed', device_id: 'dev_windows', approval_mode: 'full_access', provider: 'dsh', state: 'failed' },
+      messages: [{ id: 'msg_failed', role: 'user', content: 'Inspect', created_at: '2026-08-31T10:00:00Z' }],
+      tool_calls: [{
+        id: 'tool_failed', name: 'remote_exec', arguments_json: '{"command":"Get-Location","cwd":"relative"}',
+        status: 'failed', decision: null, exit_code: null, output_excerpt: 'REMOTE_CWD_INVALID',
+        created_at: '2026-08-31T10:00:01Z', completed_at: '2026-08-31T10:00:01Z',
+      }],
+    })
+
+    expect(timelineTools(state)[0]).toMatchObject({
+      status: 'failed', output: '', failureCode: 'REMOTE_CWD_INVALID', denied: false,
+    })
+  })
 })

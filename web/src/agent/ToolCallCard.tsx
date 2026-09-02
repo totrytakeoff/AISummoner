@@ -29,6 +29,8 @@ const failureLabels: Record<string, string> = {
   REMOTE_EXEC_CANCELED: '远程命令已取消。',
   REMOTE_EXEC_TIMEOUT: '远程命令执行超时。',
   REMOTE_EXEC_TRANSPORT: '远程命令通道异常。',
+  REMOTE_CWD_INVALID: '远程工作目录无效，请使用被控设备对应平台的绝对路径。',
+  REMOTE_POWERSHELL_FAILURE: 'Windows PowerShell 未能启动远程命令。',
 }
 
 export function ToolCallCard({ tool, collapseSignal = 0 }: ToolCallCardProps) {

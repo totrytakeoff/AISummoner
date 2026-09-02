@@ -11,13 +11,17 @@ import (
 
 type backendStub struct {
 	absolute func(string) bool
+	validate func(string) (string, error)
 }
 
 func (backendStub backendStub) isAbsolutePath(value string) bool {
 	return backendStub.absolute(value)
 }
 
-func (backendStub) validateWorkingDirectory(value string) (string, error) {
+func (backendStub backendStub) validateWorkingDirectory(value string) (string, error) {
+	if backendStub.validate != nil {
+		return backendStub.validate(value)
+	}
 	return value, nil
 }
 
@@ -55,6 +59,13 @@ func TestCommonSessionDelegatesPathSyntaxToExecutionBackend(t *testing.T) {
 	other := &sessionState{backend: state.backend}
 	if other.acceptEnvironment(append(marshalCommonString(CWDEnvironment), marshalCommonString("/tmp")...)) {
 		t.Fatal("common SSH code bypassed backend path syntax")
+	}
+	unavailable := &sessionState{backend: backendStub{
+		absolute: func(string) bool { return true },
+		validate: func(string) (string, error) { return "", errors.New("missing") },
+	}}
+	if unavailable.acceptEnvironment(append(marshalCommonString(CWDEnvironment), marshalCommonString(`C:\missing`)...)) {
+		t.Fatal("common SSH code accepted a backend-rejected working directory")
 	}
 }
 

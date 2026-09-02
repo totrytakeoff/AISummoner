@@ -338,13 +338,11 @@ func (adapter *Adapter) createOrResume(ctx context.Context, externalID string, t
 		SessionID   string `json:"sessionId"`
 		AgentPreset string `json:"agentPreset"`
 	}
-	preset := AgentPreset
-	if target.Platform == "windows" {
-		preset = WindowsAgentPreset
-	} else if target.Platform != "" && target.Platform != "linux" {
-		return protocolError("DSH target platform is unsupported")
+	preset, err := presetForTarget(target)
+	if err != nil {
+		return err
 	}
-	err := adapter.call(ctx, "session.create", struct {
+	err = adapter.call(ctx, "session.create", struct {
 		CWD         string `json:"cwd"`
 		SessionID   string `json:"sessionId"`
 		AgentPreset string `json:"agentPreset"`
@@ -356,6 +354,28 @@ func (adapter *Adapter) createOrResume(ctx context.Context, externalID string, t
 		return protocolError("DSH resumed an unexpected session")
 	}
 	return nil
+}
+
+func presetForTarget(target agent.ExecutionTarget) (string, error) {
+	if target == (agent.ExecutionTarget{}) {
+		return AgentPreset, nil
+	}
+	switch target.Platform {
+	case "linux":
+		if target.Arch == "" || target.Shell != agent.ExecutionShellPOSIXUser ||
+			target.PathFlavor != agent.PathFlavorPOSIX || target.DefaultCWDPolicy != agent.DefaultCWDInherit {
+			return "", protocolError("DSH Linux execution target is invalid")
+		}
+		return AgentPreset, nil
+	case "windows":
+		if target.Arch != "amd64" || target.Shell != agent.ExecutionShellWindowsPowerShell ||
+			target.PathFlavor != agent.PathFlavorWindows || target.DefaultCWDPolicy != agent.DefaultCWDUserProfile {
+			return "", protocolError("DSH Windows execution target is invalid")
+		}
+		return WindowsAgentPreset, nil
+	default:
+		return "", protocolError("DSH target platform is unsupported")
+	}
 }
 
 func (adapter *Adapter) prompt(ctx context.Context, externalID, userText string) error {

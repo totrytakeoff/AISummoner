@@ -15,7 +15,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
+	"github.com/aisummoner/aisummoner/internal/protocol"
 	"github.com/aisummoner/aisummoner/internal/sshserver"
 	"github.com/aisummoner/aisummoner/internal/store"
 	"github.com/aisummoner/aisummoner/internal/tunnel"
@@ -25,11 +27,17 @@ import (
 const (
 	DefaultCaptureLimit = 256 * 1024
 	MaxCaptureLimit     = 1024 * 1024
+	// x/crypto/ssh does not export a typed Session.Setenv rejection. This exact
+	// value belongs to the pinned dependency contract and is exercised through
+	// the production Embedded SSHD in Linux and Windows integration tests.
+	sshSetenvRejected = "ssh: setenv failed"
 )
 
 var (
-	ErrInvalidHostKey = errors.New("remote SSH host key does not match Device Identity")
-	ErrCaptureLimit   = errors.New("invalid SSH capture limit")
+	ErrInvalidHostKey  = errors.New("remote SSH host key does not match Device Identity")
+	ErrCaptureLimit    = errors.New("invalid SSH capture limit")
+	ErrInvalidCWD      = errors.New("invalid target working directory")
+	ErrRemoteExecStart = errors.New("remote SSH execution did not start")
 )
 
 // StreamOpener returns one typed SSH stream and the signer from the exact same
@@ -88,6 +96,9 @@ func NewDialer(opener StreamOpener, keys DeviceKeyLookup) (*Dialer, error) {
 type ExecOptions struct {
 	CWD          string
 	CaptureLimit int
+	// Platform is the trusted Device Registry platform, not model or Browser
+	// input. It makes path validation independent of the Server host OS.
+	Platform string
 }
 
 type ExecResult struct {
@@ -104,7 +115,7 @@ func (d *Dialer) Exec(ctx context.Context, deviceID, command string, options Exe
 	if command == "" || len(command) > sshserver.MaxCommandBytes || strings.ContainsRune(command, '\x00') {
 		return ExecResult{}, errors.New("SSH command must be between 1 and 8192 bytes")
 	}
-	if err := validateCWD(options.CWD); err != nil {
+	if err := validateTargetCWD(options.CWD, options.Platform); err != nil {
 		return ExecResult{}, err
 	}
 	limit := options.CaptureLimit
@@ -126,6 +137,9 @@ func (d *Dialer) Exec(ctx context.Context, deviceID, command string, options Exe
 	defer session.Close()
 	if options.CWD != "" {
 		if err := session.Setenv(sshserver.CWDEnvironment, options.CWD); err != nil {
+			if err.Error() == sshSetenvRejected {
+				return ExecResult{}, fmt.Errorf("%w: remote Device rejected the working directory", ErrInvalidCWD)
+			}
 			return ExecResult{}, fmt.Errorf("set remote cwd: %w", err)
 		}
 	}
@@ -138,7 +152,7 @@ func (d *Dialer) Exec(ctx context.Context, deviceID, command string, options Exe
 		return ExecResult{}, fmt.Errorf("open SSH stderr: %w", err)
 	}
 	if err := session.Start(command); err != nil {
-		return ExecResult{}, fmt.Errorf("start SSH exec: %w", err)
+		return ExecResult{}, fmt.Errorf("%w: %v", ErrRemoteExecStart, err)
 	}
 	captures := newCapturePair(limit)
 	stdoutResult := make(chan error, 1)
@@ -406,6 +420,77 @@ func validateCWD(value string) error {
 		return errors.New("SSH cwd must be a bounded absolute path")
 	}
 	return nil
+}
+
+func validateTargetCWD(value, platform string) error {
+	if platform != protocol.PlatformLinux && platform != protocol.PlatformWindows {
+		return fmt.Errorf("%w: unsupported target platform", ErrInvalidCWD)
+	}
+	if value == "" {
+		return nil
+	}
+	if len(value) > sshserver.MaxCWDBytes || !utf8.ValidString(value) || strings.ContainsRune(value, '\x00') {
+		return fmt.Errorf("%w: path must be bounded UTF-8", ErrInvalidCWD)
+	}
+	if platform == protocol.PlatformLinux {
+		if !strings.HasPrefix(value, "/") {
+			return fmt.Errorf("%w: POSIX path must be absolute", ErrInvalidCWD)
+		}
+		return nil
+	}
+	if !isCleanAbsoluteWindowsPath(value) {
+		return fmt.Errorf("%w: Windows path must be clean and absolute", ErrInvalidCWD)
+	}
+	return nil
+}
+
+func isCleanAbsoluteWindowsPath(value string) bool {
+	if strings.Contains(value, "/") {
+		return false
+	}
+	if len(value) >= 3 && isASCIILetter(value[0]) && value[1] == ':' && value[2] == '\\' {
+		return validWindowsPathSegments(value[3:], true)
+	}
+	if !strings.HasPrefix(value, `\\`) {
+		return false
+	}
+	remainder := value[2:]
+	if strings.HasPrefix(remainder, `?\`) || strings.HasPrefix(remainder, `.\`) {
+		return false
+	}
+	segments := strings.Split(remainder, `\`)
+	if len(segments) < 2 || !validWindowsPathSegment(segments[0]) || !validWindowsPathSegment(segments[1]) {
+		return false
+	}
+	for _, segment := range segments[2:] {
+		if !validWindowsPathSegment(segment) {
+			return false
+		}
+	}
+	return true
+}
+
+func validWindowsPathSegments(remainder string, rootAllowed bool) bool {
+	if remainder == "" {
+		return rootAllowed
+	}
+	for _, segment := range strings.Split(remainder, `\`) {
+		if !validWindowsPathSegment(segment) {
+			return false
+		}
+	}
+	return true
+}
+
+func validWindowsPathSegment(segment string) bool {
+	if segment == "" || segment == "." || segment == ".." {
+		return false
+	}
+	return !strings.ContainsAny(segment, `<>:"|?*`)
+}
+
+func isASCIILetter(value byte) bool {
+	return value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z'
 }
 
 type capturePair struct {

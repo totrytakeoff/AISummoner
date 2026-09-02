@@ -41,7 +41,7 @@ func TestWindowsTunnelSSHPowerShellEndToEnd(t *testing.T) {
 [Console]::Error.WriteLine("AIS_STDERR_中文")
 [Console]::Out.WriteLine("AIS_CWD=" + (Get-Location).Path)
 exit 17
-`, ExecOptions{CWD: directory})
+`, ExecOptions{CWD: directory, Platform: protocol.PlatformWindows})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,6 +59,13 @@ exit 17
 		t.Fatalf("PowerShell cwd %q is not %q: wanted_err=%v reported_err=%v",
 			reportedDirectory, directory, wantedErr, reportedErr)
 	}
+	missingDirectory := filepath.Join(directory, "missing")
+	if _, err := fixture.dialer.Exec(
+		context.Background(), fixture.deviceID, "exit 0",
+		ExecOptions{CWD: missingDirectory, Platform: protocol.PlatformWindows},
+	); !errors.Is(err, ErrInvalidCWD) {
+		t.Fatalf("missing Windows cwd error = %v", err)
+	}
 
 	large, err := fixture.dialer.Exec(context.Background(), fixture.deviceID, `
 $stdout = ('O' * 131072) -join ''
@@ -66,7 +73,7 @@ $stderr = ('E' * 131072) -join ''
 [Console]::Out.Write($stdout)
 [Console]::Error.Write($stderr)
 exit 9
-`, ExecOptions{CaptureLimit: 100})
+`, ExecOptions{CaptureLimit: 100, Platform: protocol.PlatformWindows})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +135,7 @@ exit 9
 	go func() {
 		_, execErr := fixture.dialer.Exec(
 			execContext, fixture.deviceID,
-			windowsChildScript("cancel-child.pid", true), ExecOptions{CWD: cancelDirectory},
+			windowsChildScript("cancel-child.pid", true), ExecOptions{CWD: cancelDirectory, Platform: protocol.PlatformWindows},
 		)
 		cancelled <- execErr
 	}()
@@ -153,7 +160,7 @@ exit 9
 	backgroundDirectory := t.TempDir()
 	background, err := fixture.dialer.Exec(
 		context.Background(), fixture.deviceID,
-		windowsChildScript("background-child.pid", false), ExecOptions{CWD: backgroundDirectory},
+		windowsChildScript("background-child.pid", false), ExecOptions{CWD: backgroundDirectory, Platform: protocol.PlatformWindows},
 	)
 	if err != nil || background.ExitCode != 0 {
 		t.Fatalf("background-parent result=%+v err=%v", background, err)
@@ -166,7 +173,7 @@ exit 9
 	go func() {
 		_, execErr := fixture.dialer.Exec(
 			context.Background(), fixture.deviceID,
-			windowsChildScript("shutdown-child.pid", true), ExecOptions{CWD: shutdownDirectory},
+			windowsChildScript("shutdown-child.pid", true), ExecOptions{CWD: shutdownDirectory, Platform: protocol.PlatformWindows},
 		)
 		shutdownExec <- execErr
 	}()

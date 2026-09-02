@@ -41,6 +41,19 @@ describe('Agent tool presentation and approval', () => {
     expect(screen.queryByText('second output')).not.toBeInTheDocument()
   })
 
+  it.each([
+    ['REMOTE_CWD_INVALID', '远程工作目录无效，请使用被控设备对应平台的绝对路径。'],
+    ['REMOTE_POWERSHELL_FAILURE', 'Windows PowerShell 未能启动远程命令。'],
+    ['REMOTE_EXEC_TIMEOUT', '远程命令执行超时。'],
+    ['COMMAND_DENIED', '命令已被拒绝。'],
+  ])('renders the stable %s failure separately', async (failureCode, message) => {
+    renderWithRouter(<ToolCallCard tool={{ ...pendingTool, status: 'failed', failureCode }} />)
+
+    await userEvent.click(screen.getByRole('button', { name: /运行命令/ }))
+    expect(screen.getByText(failureCode)).toBeInTheDocument()
+    expect(screen.getByText(message)).toBeInTheDocument()
+  })
+
   it.each<[string, ToolDecision]>([
     ['仅允许本次', 'approve_once'],
     ['拒绝', 'deny'],

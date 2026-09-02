@@ -51,7 +51,15 @@ function modelText(result) {
     return `Command denied (${result.failure?.code ?? 'COMMAND_DENIED'}).`
   }
   if (result.failure !== undefined && result.failure !== null) {
-    return `Command failed (${result.failure.code}).`
+    const messages = {
+      REMOTE_CWD_INVALID: 'The remote working directory is invalid. Use an absolute path for the selected device.',
+      REMOTE_POWERSHELL_FAILURE: 'Windows PowerShell could not start the remote command.',
+      REMOTE_EXEC_TIMEOUT: 'The remote command timed out.',
+      REMOTE_EXEC_CANCELED: 'The remote command was canceled.',
+      REMOTE_EXEC_TRANSPORT: 'The remote command channel failed.',
+      DEVICE_OFFLINE: 'The selected remote device is offline.',
+    }
+    return `${messages[result.failure.code] ?? 'The remote command failed.'} (${result.failure.code})`
   }
   const sections = []
   if (result.stdout !== '') sections.push(result.stdout)

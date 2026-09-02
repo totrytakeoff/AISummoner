@@ -10,6 +10,7 @@ on:
       - "cmd/aisummoner-client/**"
       - "cmd/windows-contract-probe/**"
       - "desktop/remote-client/**"
+      - "deploy/*dsh*"
       - "deploy/windows-spike/**"
       - "deploy/windows/**"
       - "LICENSE"
@@ -19,6 +20,7 @@ on:
       - "internal/clientplatform/**"
       - "internal/dsh/**"
       - "internal/identity/**"
+      - "internal/opencodebridge/**"
       - "internal/protocol/**"
       - "internal/remoteclient/**"
       - "internal/sshclient/**"
@@ -79,8 +81,6 @@ jobs:
             ./internal/clientplatform `
             ./internal/identity `
             ./internal/clientipc `
-            ./internal/agent `
-            ./internal/dsh `
             ./internal/sshserver `
             ./internal/sshclient
           go test -buildvcs=false -count=1 -timeout=3m -v ./internal/windowsprobe
@@ -91,8 +91,6 @@ jobs:
             ./internal/clientplatform `
             ./internal/identity `
             ./internal/clientipc `
-            ./internal/agent `
-            ./internal/dsh `
             ./internal/sshserver `
             ./internal/sshclient `
             ./internal/remoteclient `
@@ -296,7 +294,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          packages=(
+          client_packages=(
             ./internal/clientplatform
             ./internal/identity
             ./internal/clientipc
@@ -305,9 +303,18 @@ jobs:
             ./internal/tunnel
             ./cmd/aisummoner-client
           )
-          go test -buildvcs=false -count=1 "${packages[@]}"
-          go test -buildvcs=false -count=1 -race "${packages[@]:0:6}"
-          go vet -buildvcs=false "${packages[@]}"
+          server_packages=(
+            ./internal/agent
+            ./internal/app
+            ./internal/dsh
+            ./internal/sshclient
+            ./cmd/aisummoner-server
+          )
+          go test -buildvcs=false -count=1 "${client_packages[@]}" "${server_packages[@]}"
+          go test -buildvcs=false -count=1 -race "${client_packages[@]:0:6}"
+          go vet -buildvcs=false "${client_packages[@]}" "${server_packages[@]}"
+          node --check internal/dsh/assets/aisummoner/remote-bash.mjs
+          node --check internal/dsh/assets/aisummoner-windows/remote-bash.mjs
 
       - name: Install Linux Qt build dependencies
         shell: bash
@@ -326,3 +333,59 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
           cmake --build build/linux-remote --parallel 2
           ctest --test-dir build/linux-remote --output-on-failure -j 1
+
+  dsh-windows-agent-contract:
+    name: Pinned DSH / Windows execution preset
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    env:
+      GOMAXPROCS: "2"
+      GOFLAGS: "-p=1"
+
+    steps:
+      - name: Check out AISummoner source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Check out pinned DSH source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: 47f943859bef60e4160492346772ded9b24f765a
+          path: build/deepseek-harness
+          persist-credentials: false
+
+      - name: Install Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install pinned Node for cache preparation
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24.19.0"
+
+      - name: Prepare verified DSH package cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy/fetch-dsh-package-cache.sh \
+            build/deepseek-harness build/dsh-package-cache
+
+      - name: Build and verify pinned DSH runtime
+        shell: bash
+        env:
+          AISUMMONER_PNPM_ARCHIVE: ${{ github.workspace }}/build/dsh-package-cache/pnpm-11.7.0.tgz
+          AISUMMONER_PNPM_STORE: ${{ github.workspace }}/build/dsh-package-cache/pnpm-store
+        run: |
+          set -euo pipefail
+          mkdir -p dist/dsh build/dsh-runtime
+          deploy/package-dsh-runtime.sh \
+            build/deepseek-harness dist/dsh/aisummoner-dsh-runtime-linux-x64.tar.gz
+          tar -xzf dist/dsh/aisummoner-dsh-runtime-linux-x64.tar.gz \
+            -C build/dsh-runtime
+          runtime_root="$PWD/build/dsh-runtime/aisummoner-dsh-runtime"
+          deploy/check-dsh-runtime.sh "$runtime_root"
+          AISUMMONER_TEST_DSH_RUNTIME_ROOT="$runtime_root" \
+            go test -buildvcs=false -count=1 -timeout=45s -v ./internal/dsh \
+              -run '^TestPinnedHost(LoadsBothReviewedExecutionPresets|WindowsPresetRunsRemoteToolTurn)$'

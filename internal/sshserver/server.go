@@ -260,13 +260,21 @@ func (state *sessionState) acceptEnvironment(payload []byte) bool {
 	if state.launched || state.cwd != "" {
 		return false
 	}
+	backend := state.executionBackend()
 	name, rest, ok := consumeString(payload, MaxCWDBytes)
 	if !ok || name != CWDEnvironment {
 		return false
 	}
 	value, rest, ok := consumeString(rest, MaxCWDBytes)
 	if !ok || len(rest) != 0 || value == "" || len(value) > MaxCWDBytes ||
-		!state.executionBackend().isAbsolutePath(value) {
+		!backend.isAbsolutePath(value) {
+		return false
+	}
+	// Validate the explicit directory while replying to the SSH env request so
+	// the trusted client can distinguish a rejected cwd from a later shell-start
+	// failure. Execution validates it again to retain the fail-closed TOCTOU
+	// boundary if the directory changes between requests.
+	if _, err := backend.validateWorkingDirectory(value); err != nil {
 		return false
 	}
 	state.cwd = value

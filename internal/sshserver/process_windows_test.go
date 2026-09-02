@@ -70,24 +70,30 @@ func TestWindowsPowerShellExecRepeatedlyClosesNativeHandles(t *testing.T) {
 	}
 	command := `[Console]::Out.Write("stdout"); [Console]::Error.Write("stderr")`
 	// Exclude bounded process-wide initialization by Go and the complete
-	// stdout/stderr pump path from the leak slope. A real per-exec leak keeps
-	// growing when the identical command is repeated after this warm-up.
+	// stdout/stderr pump path from the leak slope. The Windows runner has shown
+	// that its pipe runtime may grow a small handle cache during the second
+	// batch, so calibrate through two identical batches before measuring twice
+	// that sample. A real per-exec leak continues growing across the observation
+	// window instead of converging after calibration.
 	for attempt := 0; attempt < 8; attempt++ {
 		run(command)
 	}
-	before, err := windowsCurrentProcessHandleCount()
+	for attempt := 0; attempt < 8; attempt++ {
+		run(command)
+	}
+	calibrated, err := windowsCurrentProcessHandleCount()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for attempt := 0; attempt < 8; attempt++ {
+	for attempt := 0; attempt < 16; attempt++ {
 		run(command)
 	}
 	after, err := windowsCurrentProcessHandleCount()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after > before+3 {
-		t.Fatalf("PowerShell handle count grew from %d to %d", before, after)
+	if after > calibrated+3 {
+		t.Fatalf("PowerShell handle count kept growing after calibration: %d to %d", calibrated, after)
 	}
 }
 

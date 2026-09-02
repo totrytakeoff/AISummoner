@@ -47,11 +47,21 @@ func NewRemoteExecutor(dialer *sshclient.Dialer) (agent.RemoteExecutor, error) {
 	return &remoteExecutor{exec: dialer.Exec}, nil
 }
 
-func (executor *remoteExecutor) Exec(ctx context.Context, deviceID, command, cwd string) (agent.RemoteExecution, error) {
+func (executor *remoteExecutor) Exec(ctx context.Context, deviceID string, target agent.ExecutionTarget, command, cwd string) (agent.RemoteExecution, error) {
 	result, err := executor.exec(ctx, deviceID, command, sshclient.ExecOptions{
-		CWD: cwd, CaptureLimit: agent.MaxToolOutputBytes + 1,
+		CWD: cwd, CaptureLimit: agent.MaxToolOutputBytes + 1, Platform: target.Platform,
 	})
 	if err != nil {
+		failureCode := ""
+		switch {
+		case errors.Is(err, sshclient.ErrInvalidCWD):
+			failureCode = agent.FailureInvalidCWD
+		case target.Shell == agent.ExecutionShellWindowsPowerShell && errors.Is(err, sshclient.ErrRemoteExecStart):
+			failureCode = agent.FailurePowerShell
+		}
+		if failureCode != "" {
+			return agent.RemoteExecution{}, &agent.ExecutionError{Code: failureCode, Err: err}
+		}
 		return agent.RemoteExecution{}, err
 	}
 	return agent.RemoteExecution{Stdout: result.Stdout, Stderr: result.Stderr, ExitCode: result.ExitCode}, nil

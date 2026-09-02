@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aisummoner/aisummoner/internal/protocol"
 	"github.com/aisummoner/aisummoner/internal/sshserver"
 	"github.com/aisummoner/aisummoner/internal/store"
 	"golang.org/x/crypto/ssh"
@@ -31,14 +32,14 @@ func TestExecSeparatesOutputStatusAndValidatesCWD(t *testing.T) {
 	fixture := newSSHFixture(t)
 	dialer := fixture.dialer(t, fixture.hostPublicKey, fixture.clientSigner)
 	directory := t.TempDir()
-	result, err := dialer.Exec(context.Background(), "dev_test", "printf stdout; printf stderr >&2; exit 7", ExecOptions{CWD: directory})
+	result, err := dialer.Exec(context.Background(), "dev_test", "printf stdout; printf stderr >&2; exit 7", ExecOptions{CWD: directory, Platform: protocol.PlatformLinux})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(result.Stdout) != "stdout" || string(result.Stderr) != "stderr" || result.ExitCode != 7 {
 		t.Fatalf("exec result = %+v", result)
 	}
-	result, err = dialer.Exec(context.Background(), "dev_test", "pwd -P", ExecOptions{CWD: directory})
+	result, err = dialer.Exec(context.Background(), "dev_test", "pwd -P", ExecOptions{CWD: directory, Platform: protocol.PlatformLinux})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,12 +51,12 @@ func TestExecSeparatesOutputStatusAndValidatesCWD(t *testing.T) {
 		t.Fatalf("remote cwd = %q, want %q", result.Stdout, wantDirectory)
 	}
 	for _, cwd := range []string{"relative", filepath.Join(directory, "missing")} {
-		if _, err := dialer.Exec(context.Background(), "dev_test", "true", ExecOptions{CWD: cwd}); err == nil {
-			t.Fatalf("invalid cwd %q was accepted", cwd)
+		if _, err := dialer.Exec(context.Background(), "dev_test", "true", ExecOptions{CWD: cwd, Platform: protocol.PlatformLinux}); !errors.Is(err, ErrInvalidCWD) {
+			t.Fatalf("invalid cwd %q error = %v", cwd, err)
 		}
 	}
-	if _, err := dialer.Exec(context.Background(), "dev_test", "true", ExecOptions{CWD: "/tmp\x00invalid"}); err == nil {
-		t.Fatal("NUL-containing cwd was accepted")
+	if _, err := dialer.Exec(context.Background(), "dev_test", "true", ExecOptions{CWD: "/tmp\x00invalid", Platform: protocol.PlatformLinux}); !errors.Is(err, ErrInvalidCWD) {
+		t.Fatalf("NUL-containing cwd error = %v", err)
 	}
 }
 
@@ -65,7 +66,7 @@ func TestExecContextDeadlineCancelsRemoteProcess(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	if _, err := dialer.Exec(ctx, "dev_test", "sleep 30", ExecOptions{}); !errors.Is(err, context.DeadlineExceeded) {
+	if _, err := dialer.Exec(ctx, "dev_test", "sleep 30", ExecOptions{Platform: protocol.PlatformLinux}); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("deadline exec error = %v", err)
 	}
 	if elapsed := time.Since(started); elapsed > time.Second {
@@ -79,7 +80,7 @@ func TestExecCombinedCaptureIsBoundedAndDrained(t *testing.T) {
 	exact, err := dialer.Exec(
 		context.Background(), "dev_test",
 		"head -c 32768 /dev/zero | tr '\\000' A; head -c 32768 /dev/zero | tr '\\000' B >&2",
-		ExecOptions{CaptureLimit: 65536},
+		ExecOptions{CaptureLimit: 65536, Platform: protocol.PlatformLinux},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +94,7 @@ func TestExecCombinedCaptureIsBoundedAndDrained(t *testing.T) {
 	result, err := dialer.Exec(
 		context.Background(), "dev_test",
 		"yes O | head -c 131072; yes E | head -c 131072 >&2; exit 9",
-		ExecOptions{CaptureLimit: 100},
+		ExecOptions{CaptureLimit: 100, Platform: protocol.PlatformLinux},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +108,7 @@ func TestExecCombinedCaptureIsBoundedAndDrained(t *testing.T) {
 	if result.ExitCode != 9 {
 		t.Fatalf("large drained exec exit code = %d", result.ExitCode)
 	}
-	if _, err := dialer.Exec(context.Background(), "dev_test", "true", ExecOptions{CaptureLimit: MaxCaptureLimit + 1}); !errors.Is(err, ErrCaptureLimit) {
+	if _, err := dialer.Exec(context.Background(), "dev_test", "true", ExecOptions{CaptureLimit: MaxCaptureLimit + 1, Platform: protocol.PlatformLinux}); !errors.Is(err, ErrCaptureLimit) {
 		t.Fatalf("capture limit error = %v", err)
 	}
 }
@@ -120,13 +121,13 @@ func TestDialRejectsWrongHostClientKeyAndUsername(t *testing.T) {
 
 	t.Run("host key", func(t *testing.T) {
 		dialer := fixture.dialer(t, wrongHostPublic, fixture.clientSigner)
-		if _, err := dialer.Exec(context.Background(), "dev_test", "true", ExecOptions{}); !errors.Is(err, ErrInvalidHostKey) {
+		if _, err := dialer.Exec(context.Background(), "dev_test", "true", ExecOptions{Platform: protocol.PlatformLinux}); !errors.Is(err, ErrInvalidHostKey) {
 			t.Fatalf("wrong host-key error = %v", err)
 		}
 	})
 	t.Run("client key", func(t *testing.T) {
 		dialer := fixture.dialer(t, fixture.hostPublicKey, wrongClientSigner)
-		if _, err := dialer.Exec(context.Background(), "dev_test", "true", ExecOptions{}); err == nil {
+		if _, err := dialer.Exec(context.Background(), "dev_test", "true", ExecOptions{Platform: protocol.PlatformLinux}); err == nil {
 			t.Fatal("wrong connection-scoped client key was accepted")
 		}
 	})
@@ -169,7 +170,7 @@ func TestDialRejectsNonEd25519SignerAndPropagatesDeadlineFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dialer.Exec(context.Background(), "dev_test", "true", ExecOptions{}); err == nil {
+	if _, err := dialer.Exec(context.Background(), "dev_test", "true", ExecOptions{Platform: protocol.PlatformLinux}); err == nil {
 		t.Fatal("non-Ed25519 connection signer was accepted")
 	}
 
@@ -186,7 +187,7 @@ func TestDialRejectsNonEd25519SignerAndPropagatesDeadlineFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dialer.Exec(context.Background(), "dev_test", "true", ExecOptions{}); !errors.Is(err, wantError) {
+	if _, err := dialer.Exec(context.Background(), "dev_test", "true", ExecOptions{Platform: protocol.PlatformLinux}); !errors.Is(err, wantError) {
 		t.Fatalf("deadline setup error = %v, want %v", err, wantError)
 	}
 	if !wrapped.closed {
@@ -377,7 +378,7 @@ func TestExecCancelKillsAndReapsProcessGroup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		_, err := dialer.Exec(ctx, "dev_test", "sleep 30 & echo $! > child.pid; wait", ExecOptions{CWD: directory})
+		_, err := dialer.Exec(ctx, "dev_test", "sleep 30 & echo $! > child.pid; wait", ExecOptions{CWD: directory, Platform: protocol.PlatformLinux})
 		done <- err
 	}()
 	pid := waitForPIDFile(t, filepath.Join(directory, "child.pid"))
@@ -400,7 +401,7 @@ func TestExecNormalParentExitKillsBackgroundDescendant(t *testing.T) {
 	result, err := dialer.Exec(
 		context.Background(), "dev_test",
 		"sleep 30 & echo $! > child.pid",
-		ExecOptions{CWD: directory},
+		ExecOptions{CWD: directory, Platform: protocol.PlatformLinux},
 	)
 	if err != nil || result.ExitCode != 0 {
 		t.Fatalf("background-parent exec result=%+v err=%v", result, err)
