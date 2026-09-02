@@ -34,7 +34,7 @@ Go Remote Core（共同状态机、配对、Tunnel、事件、IPC dispatch）
 配对码；关闭 GUI 不断开后台连接；手动暂停会 joined 关闭 Tunnel 和全部子进程。用户不填
 Server 地址，默认地址继续在构建时写入，设置页只保留高级覆盖入口。
 
-## 实施进展（2026-08-31）
+## 实施进展（2026-09-02）
 
 Task023 已在 Windows Server 2022 CI 证明 named pipe/peer token、DPAPI/ACL、PowerShell/
 Job、ConPTY、Qt/MSVC 与工程打包合同。Task024 随后完成生产代码拆分：
@@ -52,8 +52,14 @@ token/LocalAppData、DPAPI/ACL Identity 和认证 named pipe 接入这些生产 
 SHA-256 的 unsigned 工程 ZIP。Task026 随后把生产 SSH 非 PTY exec 接到系统 Windows
 PowerShell 5.1、suspended Job assignment 与 joined descendant cleanup；Task027 又把生产
 ConPTY Terminal 的 VT/UTF-8、cwd、resize、Ctrl-C 与 joined cleanup 接入同一真实
-TLS/WSS→yamux→strict SSH 原生链路。下一步是 Task028 的普通用户 Qt/干净机验收。Windows
-仍未成为支持平台，ADR-0007 仍为 Proposed。
+TLS/WSS→yamux→strict SSH 原生链路。Task028 随后完成生产形态 Qt/sibling-Core 工程包，并
+在 Windows Server 2022 的新建非提升标准账户下证明无控制台启动、同 logon 认证 IPC 和 GUI
+退出后 Core 保活。Task029 再由 owned Device 派生不可变 Execution Profile，加入
+target-aware Windows cwd、DSH PowerShell preset 和稳定错误分类；真实 pinned DSH Host
+provider/tool/follow-up Turn 与原生 Windows Tunnel/SSH/PowerShell 链路分别通过，并在类型化
+`RemoteExecInvoker` seam 汇合。GitHub 隔离作业无法组成一条私有跨 OS 网络，因此单次真实
+Browser 登录/配对/DSH→Windows 部署验证仍是发布门。Windows 仍未成为支持平台，ADR-0007
+仍为 Proposed。
 
 ## Task024 前代码审计
 
@@ -399,11 +405,16 @@ Windows Server 2022，因此普通用户桌面/Browser 验收仍归 Task028。**
 
 完成 Windows UI、自动/无窗口 daemon 启动、关闭 GUI 保活、`windeployqt` portable ZIP 和
 干净 VM 验证。
+**生产形态实现、工程 ZIP 和新建非提升 Server 2022 标准账户证据已完成并移交人工 review；
+Windows 11/10 干净 VM 仍未完成。**
 
 ### Task029：Agent 平台适配与发布门
 
 完成 target-aware cwd、Execution Profile、DSH PowerShell 语义、真实 Agent Turn；再做
 per-user installer、签名、Windows 11/10 E2E、升级/卸载/回滚说明。
+**Agent 实现与分层真实运行时/原生 Windows 证据已完成并移交人工 review。两部分在
+`RemoteExecInvoker` seam 汇合，不冒充单次跨机器部署 E2E；后半段 installer、签名、干净
+Windows 11/10 与公开部署验证继续作为发布工作。**
 
 每个 Task 都必须保持 Linux 现有行为，不得等到最后一次性修复回归。
 

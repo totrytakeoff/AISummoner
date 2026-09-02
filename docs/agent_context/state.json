@@ -3,11 +3,11 @@
   "project": "AISummoner",
   "context_dir": "docs/agent_context",
   "current_task": "task029",
-  "current_stage": "coding",
-  "status": "running",
+  "current_stage": "review",
+  "status": "awaiting_review",
   "iteration": 0,
-  "last_decision": "TASK029_IMPLEMENTATION_READY_FOR_HOSTED_WINDOWS_AND_PINNED_DSH_CONTRACTS",
-  "next_agent": "coder",
+  "last_decision": "TASK029_IMPLEMENTATION_AND_HOSTED_CONTRACTS_READY_FOR_REVIEW",
+  "next_agent": "human_reviewer",
   "max_revisions_per_task": 3,
-  "updated_at": "2026-09-02T21:13:13+08:00"
+  "updated_at": "2026-09-02T21:43:39+08:00"
 }

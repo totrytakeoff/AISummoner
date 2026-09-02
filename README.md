@@ -8,8 +8,9 @@ AISummoner 是一个面向远程设备的自托管 AI Agent 与 SSH 控制平台
 所有模型工具调用最终都必须经过 AISummoner 的设备所有权、审批和 SSH 执行边界。
 
 当前项目处于 **Alpha**。MVP-0 的端到端链路已经跑通，DSH-first Controller 和
-Linux Qt Remote Client 已形成第一版可用形态；接下来重点是完善 Agent 体验、接入
-OpenCode/Codex/Claude Code，以及扩展 Windows Remote Client。
+Linux Qt Remote Client 已形成第一版可用形态；Windows 原生工程版也已完成 Core、Qt、
+PowerShell/ConPTY 和 target-aware DSH 合约验证。接下来重点是完善 Agent 体验、接入
+OpenCode/Codex/Claude Code，以及完成 Windows 10/11 与签名发布门槛。
 
 [文档导航](docs/README.md) · [快速开始](docs/quick-start.md) ·
 [开发路线](docs/roadmap.md) · [安全说明](SECURITY.md) ·
@@ -20,12 +21,12 @@ OpenCode/Codex/Claude Code，以及扩展 Windows Remote Client。
 | 模块 | 当前状态 |
 | --- | --- |
 | Browser Controller | DSH-first 三栏工作区；Device、Session、Agent、Terminal 与设置已打通 |
-| Remote Client | Linux x86_64：Go daemon + 私有 IPC + Qt 6 Widgets GUI + AppImage |
-| Terminal | 真实 SSH PTY、交互输入、resize、关闭与断线回收 |
-| Agent | DSH 多供应商/模型切换；Fake、直接 DeepSeek 与 MVP OpenCode；统一 Remote 执行边界 |
+| Remote Client | Linux x86_64 AppImage；Windows x86_64 unsigned 工程 ZIP（Go Core + Qt GUI） |
+| Terminal | Linux PTY 与 Windows PowerShell/ConPTY；交互、resize、关闭与断线回收 |
+| Agent | DSH 多供应商/模型切换与 Linux/Windows 目标 Profile；统一 Remote 执行边界 |
 | Session | 恢复、权限模式、归档、恢复、删除与有序事件重放 |
 | 部署 | 单节点、单管理员、自托管；Docker/Caddy 示例与直接二进制部署 |
-| 平台 | Linux 已验证；Windows 计划中；macOS 尚未承诺 |
+| 平台 | Linux 已验证；Windows Server 2022 工程 CI 已通过，Windows 10/11 尚未正式支持；macOS 尚未承诺 |
 
 目前不是生产级远程管理产品：尚无多用户/RBAC、集群、文件管理、桌面控制，也没有
 正式 Release 或稳定兼容承诺。公开仓库中的测试部署地址不构成公共服务 SLA。

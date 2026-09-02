@@ -192,3 +192,44 @@ Qt CTest/认证 IPC/打包与 Ubuntu normal/race/vet 回归同样通过。artifa
 本证据仍不接受 ADR：runner facts 明确为 high-integrity/elevated Session 2，尚缺 ordinary-
 user Windows 11/10、第二 logon、clean VM、GUI sibling Core 无 console flash/关闭保活、可信
 Agent Execution Profile/真实 DSH Turn 和签名交付。Git Bash/MSYS2 仍未内置或设为前置依赖。
+
+## Task028 当前证据（2026-09-01）
+
+Windows Qt GUI 已通过生产 `DaemonLauncher` 从 canonical application directory 启动唯一可信
+sibling Core，并使用 `CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`、隐藏窗口、空标准流和
+current-token Profile cwd。关闭 GUI 不发送 pause/shutdown，Core 与 authenticated named pipe
+继续存活。打包阶段包含 Qt/TLS/style plugin、VC runtime、许可、notices、manifest 和明确的
+unsigned engineering README。
+
+最终证据为
+[run 33374475203](https://github.com/totrytakeoff/AISummoner/actions/runs/33374475203)：
+Windows Server 2022 上创建的新本地标准账户以 medium integrity、非提升 token 从 stage 运行
+GUI/Core，证明无 console flash、same-logon IPC、GUI close 后 Core survival 和清理；Linux
+Core/Qt 回归同步通过。artifact `9751443604` 内层 ZIP SHA-256 为
+`3320bbb394b0a926d9b83d67e41857ee9ac4a32610b66cf471fa994a35e872e5`。
+
+这关闭了 hosted ordinary-user/package 缺口，但不是 Windows 11/10 clean VM，也未证明第二
+logon 拒绝或签名安装。因此 ADR 仍为 `Proposed`。
+
+## Task029 当前证据（2026-09-02）
+
+Server 现在只从 authenticated owner-scoped Device 派生完整且不可变的执行目标：
+`windows/amd64` 映射到 `windows-powershell`、Windows path flavor 和 user-Profile 默认 cwd；
+Linux 保留 POSIX/user-shell，未知组合在 provider Turn 前 fail closed。显式 Windows cwd 先按
+目标语法、再由 Remote backend 按真实文件系统校验；省略 cwd 由 Windows Core 解析 current-
+token Profile。DSH 使用独立 reviewed Windows preset，仍只可经 HMAC Capability Bridge 调用
+Device-bound `remote_exec`。Git Bash/MSYS2/WSL/`pwsh` 均未内置或隐式选择。
+
+最终证据为
+[run 33636189891](https://github.com/totrytakeoff/AISummoner/actions/runs/33636189891)：
+job `100267538671` 构建实际 pinned DSH `0.1.0-rc.5`/Node `24.19.0`，并完成 provider → DSH
+Windows tool call → HMAC bridge → typed invoker → tool result → streamed final answer；job
+`100267539014` 在原生 Windows 2022 完成 Device challenge、TLS/WSS、yamux、strict SSH、
+PowerShell omitted/Profile cwd、Terminal、Qt/IPC、普通用户 package lifecycle；Linux job
+`100267538874` 保持全绿。artifact `9849067518` 内层 ZIP SHA-256 为
+`d2c5a76256a54779f4cafc31ef73c5b3f5116c3b6beb846e54a8463e939e36a5`。
+
+DSH 与 Windows 作业在生产类型 `RemoteExecInvoker` seam 汇合。它们是真实运行时与真实原生
+数据面证据，但 GitHub 隔离作业不能冒充单次 Browser login/pairing → Linux Server/DSH →
+Windows Remote 的跨机器部署。因此 clean Windows 11/10、第二 logon、该单次部署验证、
+installer/Authenticode 仍为接受/发布门，ADR 状态继续为 `Proposed`。

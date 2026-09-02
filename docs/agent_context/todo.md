@@ -31,16 +31,30 @@ updated_by: coder
 
 - [x] task027 (ready for human review): production Windows ConPTY Terminal now
   provides fixed PowerShell 5.1, VT/UTF-8, cwd, resize/Ctrl-C and joined Job/
-  pipe/handle cleanup through the real native chain. Task028 GUI and Task029
-  Agent/release gates remain open; no Windows support claim is inferred.
+  pipe/handle cleanup through the real native chain. Tasks028-029 subsequently
+  completed the hosted GUI and Agent engineering gates; no public Windows
+  support claim is inferred.
+
+- [x] task028 (ready for human review): the production-shaped Qt GUI package
+  launches its trusted sibling Core without a console, survives GUI close and
+  passes authenticated IPC under a fresh non-elevated standard account on
+  hosted Windows Server 2022. Clean Windows 11/10 remains release evidence.
+
+- [x] task029 (ready for human review): Server-owned immutable execution target,
+  target-aware Windows cwd, native DSH PowerShell preset, stable failure classes
+  and the real pinned DSH Host tool loop now pass alongside the native Windows
+  Tunnel/SSH/PowerShell data plane. The two hosted halves meet at the typed
+  `RemoteExecInvoker` seam; one literal cross-machine release run remains.
 
 - [ ] task023 (in progress): Windows Server 2022 CI now proves the strict
   Qt↔Go named-pipe path, exact peer-token check, DPAPI/ACL, suspended Job,
   PowerShell/ConPTY runtime, Qt/MSVC build and unsigned contract bundle. The
   accepted CI evidence is run `33330465430` and includes the official Visual
-  C++ Redistributable. Ordinary-user Windows 11/10, different-logon rejection,
-  clean-VM/no-console-flash and production Core E2E remain before ADR-0007 can
-  be accepted.
+  C++ Redistributable. Task028 has since proved the production package,
+  no-console launch and Core lifecycle under a fresh non-elevated Server 2022
+  account; Task029 has proved the Agent execution contract. Clean Windows
+  11/10, different-logon rejection, signed delivery and one literal public
+  deployment E2E remain before ADR-0007 can be accepted.
 
 - [x] task022: freeze the common Runtime provider/model boundary, implement
   DSH-native multi-provider configuration and current-Session model selection,
@@ -104,8 +118,12 @@ updated_by: coder
 - [x] task028 (ready for review): complete the ordinary-user Qt GUI sibling-Core launcher,
   no-console-flash and GUI-close daemon-survival contracts, plus the hosted
   standard-account portable-package proof. Clean Windows 10/11 desktop
-  validation remains open; Windows Agent operations stay fail closed until
-  Task029's trusted Execution Profile and real DSH Turn pass.
+  validation remains open.
+- [x] task029 (ready for review): complete the trusted target/PowerShell profile,
+  target-aware cwd and pinned DSH tool-Turn evidence without changing other
+  Runtime adapters or claiming public Windows support.
+- [ ] Human-review Task029 and choose between the A5 OpenCode compatibility
+  slice and the remaining Windows 11/10/signing/public-release gates.
 - [ ] Complete Task023's ordinary-user Windows 11/10, wrong-logon and clean-VM
   evidence before accepting or revising Proposed ADR-0007. This validation now
   runs alongside the user-authorized, non-enabling Task024 extraction.
@@ -142,10 +160,10 @@ updated_by: coder
 
 ## Blocked
 
-- No active implementation blocker. Task023's remaining evidence needs a
-  non-elevated Windows 11/10 desktop VM and, for the wrong-logon checks, a
-  second local account. The user explicitly allowed those checks to follow the
-  current GitHub Actions implementation pass.
+- No active implementation blocker. Task023's remaining evidence needs a clean
+  Windows 11/10 desktop VM and, for the wrong-logon checks, a second local
+  account. A final literal Server/Browser -> paired Windows Remote Agent run and
+  signing/installer work are release gates, not missing Task029 implementation.
 - This host still has no native Go toolchain; bounded local Go builds use the
   pinned serial Docker environment. No Task023 verification requires or
   modifies ASD.

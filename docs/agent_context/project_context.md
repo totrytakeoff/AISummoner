@@ -8,7 +8,13 @@ updated_by: coder
 
 ## Purpose
 
-AISummoner is a browser-controlled, server-side Agent and SSH remote execution platform. A Linux Remote Client initiates an outbound WSS connection to a single Server. The browser pairs devices, opens a terminal, and drives a provider-neutral Agent that can execute only against the bound Remote. MVP-0 proved this vertical slice. Alpha now has a first usable DSH-first Controller and Qt Remote Client; the next work is richer Runtime compatibility and additional Remote platforms.
+AISummoner is a browser-controlled, server-side Agent and SSH remote execution
+platform. A Remote Client initiates an outbound WSS connection to a single
+Server. The browser pairs devices, opens a terminal, and drives a
+provider-neutral Agent that can execute only against the bound Remote. MVP-0
+proved this vertical slice. Alpha now has a first usable DSH-first Controller,
+a supported Linux Qt Remote and a native Windows engineering implementation;
+the next product work is richer Runtime compatibility and release validation.
 
 ## Tech Stack
 
@@ -90,9 +96,16 @@ AISummoner is a browser-controlled, server-side Agent and SSH remote execution p
   production inbox-PowerShell non-PTY exec, suspended Job assignment and joined
   process-tree cleanup. Task027 adds production PowerShell/ConPTY Terminal with
   VT/UTF-8, cwd, resize, Ctrl-C and joined cleanup, proven through the same
-  native TLS/WSS/yamux/strict SSH chain. Ordinary-user Windows 11/10,
-  wrong-logon, clean-VM GUI launch, real Agent and public production E2E remain,
-  so Windows is not yet supported and ADR-0007 remains Proposed.
+  native TLS/WSS/yamux/strict SSH chain. Task028 proves the production-shaped
+  Qt/sibling-Core package under a fresh non-elevated standard account on hosted
+  Windows Server 2022, including no-console launch, same-logon IPC and GUI-close
+  Core survival. Task029 adds the Server-owned immutable target profile,
+  target-aware cwd, a native DSH PowerShell preset, stable execution failures
+  and a real pinned DSH Host tool Turn composed with the native Windows data
+  plane at `RemoteExecInvoker`. Clean Windows 11/10, second-logon rejection,
+  signed installer and one literal cross-machine Browser/pairing/Agent release
+  run remain, so Windows is not yet a publicly supported platform and ADR-0007
+  remains Proposed.
 
 ## Constraints
 

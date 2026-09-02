@@ -1,7 +1,7 @@
 ---
 task_id: task029
 type: plan
-status: in_progress
+status: ready_for_review
 from: planner
 to: coder
 revision: 0
@@ -9,6 +9,19 @@ requires_review: true
 ---
 
 # Task 029 Plan: Target-Aware Windows Agent Execution Profile
+
+## Status
+
+Implementation and bounded local/hosted evidence are complete and ready for
+human review. The hosted proof deliberately composes a real pinned DSH Host
+tool Turn with the native Windows Tunnel/SSH/PowerShell data plane at the
+reviewed `RemoteExecInvoker` seam. GitHub Actions jobs cannot form a private
+cross-OS network with one another, so a literal Browser login/pairing flow from
+the Linux DSH job into the Windows runner remains release evidence rather than
+being represented as completed here.
+
+ADR-0007 remains Proposed. The engineering result does not declare Windows
+10/11 support, a signed installer or a public Windows release.
 
 ## Objective
 

@@ -30,11 +30,14 @@ token/LocalAppData, DPAPI/ACL Identity and authenticated named-pipe IPC.
 Task026 then added real inbox-PowerShell non-PTY exec with suspended Job
 assignment and joined descendant cleanup through native TLS/WSS/yamux/strict
 SSH. Task027 now adds production PowerShell/ConPTY Terminal with VT/UTF-8,
-resize, Ctrl-C and joined lifecycle through the same native chain. Agent
-target-shell awareness and ordinary-user desktop/E2E proof still remain. The primary product
-debt is the remaining one-Turn lifecycle, incomplete Runtime capabilities and
-the still-unproved Windows execution/platform seam rather than Controller
-chrome.
+resize, Ctrl-C and joined lifecycle through the same native chain. Task028 adds
+the production-shaped Qt/sibling-Core package and a fresh non-elevated hosted
+account lifecycle proof. Task029 adds the Server-owned immutable target profile,
+target-aware cwd and a real pinned DSH Windows/PowerShell tool Turn, composed
+with the native Windows data plane at the typed `RemoteExecInvoker` seam. The
+primary product debt is the remaining Runtime lifecycle/capabilities and public
+Windows release evidence—clean Windows 11/10, second-logon, signing and one
+literal cross-machine Browser/pairing/Agent run—rather than Controller chrome.
 
 ## Alpha Target Shape
 
@@ -64,7 +67,7 @@ Remote Core Daemon
   ├─ Device identity / reconnect / Embedded SSHD
   ├─ local restrictive policy
   ├─ bounded sanitized activity events
-  └─ private Unix socket
+  └─ authenticated private local IPC (Unix socket / Windows named pipe)
               ▲
        Remote Desktop UI
 ```
@@ -154,9 +157,11 @@ not a separate Windows product fork.
 5. Prove the Windows backend contracts and extract the common platform seams.
    **Windows Server 2022 contracts, the Task024 extraction, Task025 native
    Core/DPAPI/named-pipe implementation, Task026 PowerShell/Job exec and
-   Task027 production ConPTY Terminal are complete.** Prove the ordinary-user
-   Qt desktop/package contract next, then add a trusted Agent Execution Profile
-   without weakening Linux behavior.
+   Task027 production ConPTY Terminal, Task028 ordinary-user Qt/package proof
+   and Task029 trusted Agent Execution Profile are complete and ready for human
+   review.** Hosted DSH and Windows evidence meet at the reviewed typed Remote
+   executor seam; clean Windows 11/10, different-logon, signing and a literal
+   cross-machine release run remain before public support.
 6. Add structured file/diff and Desktop capabilities only through separate ADRs.
 
 Old routes should redirect for at least one migration release. Existing Session

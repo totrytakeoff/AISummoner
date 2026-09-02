@@ -43,8 +43,9 @@ Capability 权威；不能引入 Browser 直连 Provider 或 Server 本地 shell
   新增带 logon-SID 验证的 Named Pipe、DPAPI Device Identity、PowerShell/ConPTY、Job Object
   进程树回收和原生 Qt 打包。兼容性/安全 spike、共同 Core 平台接口和真实 Windows
   Core/DPAPI Identity/认证 IPC、PowerShell/Job exec 和 ConPTY Terminal 已完成并通过真实
-  原生链路 CI；下一步依次完成普通用户 GUI/干净机验收与 Agent profile，最后才签名发布。
-  Git Bash 可在未来
+  原生链路 CI；普通用户 Qt/sibling-Core 工程包与 target-aware DSH PowerShell profile 也已
+  完成 hosted 工程验证。下一步是 clean Windows 11/10、第二 logon、单次跨机器公开链路、
+  installer 与 Authenticode，完成前不声明 Windows 正式支持。Git Bash 可在未来
   作为显式可选 profile，但不会内置或成为前置依赖；Core 也不会直接注册为 LocalSystem
   Service。详细方案见
   [Windows 被控客户端移植方案](design/windows-remote-client-port.md)。

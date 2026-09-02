@@ -102,8 +102,11 @@ updated_by: coder
   no console flash, GUI-close daemon survival and a production-shaped
   engineering ZIP on the hosted standard-account runner; clean Windows 10/11
   VM evidence remains open.
-- [ ] A8.4 task029: add the trusted Agent Execution Profile/DSH PowerShell
-  path, then sign/package after final public E2E.
+- [x] A8.4 task029 (ready for human review): add the Server-owned immutable
+  Agent Execution Profile, target-aware Windows cwd, stable failure mapping and
+  real pinned DSH PowerShell tool loop. Hosted DSH and native Windows proofs
+  meet at `RemoteExecInvoker`; clean Windows 11/10, a literal cross-machine
+  Browser/pairing run, installer and Authenticode remain separate release gates.
 - [ ] Structured Remote file read/search/write/patch/diff.
 - [ ] Remote local restrictive permissions.
 - [ ] Desktop viewing/input only after a dedicated threat model and ADR.
