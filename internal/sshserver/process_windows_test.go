@@ -47,6 +47,13 @@ func TestWindowsExecutionBackendPathAndFailClosedShellContracts(t *testing.T) {
 }
 
 func TestWindowsPowerShellExecRepeatedlyClosesNativeHandles(t *testing.T) {
+	// Resolve the lazy DLL/procedure and let the Go Windows syscall path finish
+	// its own bounded initialization before any process-lifecycle baseline is
+	// captured. Otherwise the probe itself adds handles after its first result
+	// and looks like a PowerShell leak.
+	if _, err := windowsCurrentProcessHandleCount(); err != nil {
+		t.Fatal(err)
+	}
 	backend := windowsExecutionBackend{}
 	directory, err := backend.validateWorkingDirectory(t.TempDir())
 	if err != nil {
@@ -95,6 +102,7 @@ func TestWindowsPowerShellExecRepeatedlyClosesNativeHandles(t *testing.T) {
 	if after > calibrated+3 {
 		t.Fatalf("PowerShell handle count kept growing after calibration: %d to %d", calibrated, after)
 	}
+	t.Logf("PowerShell handle count converged after calibration: %d to %d", calibrated, after)
 }
 
 func TestWindowsConPTYShellRepeatedlyClosesNativeHandles(t *testing.T) {

@@ -59,6 +59,28 @@ exit 17
 		t.Fatalf("PowerShell cwd %q is not %q: wanted_err=%v reported_err=%v",
 			reportedDirectory, directory, wantedErr, reportedErr)
 	}
+	defaultResult, err := fixture.dialer.Exec(
+		context.Background(), fixture.deviceID,
+		`[Console]::Out.WriteLine("AIS_DEFAULT_CWD=" + (Get-Location).Path)`,
+		ExecOptions{Platform: protocol.PlatformWindows},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultDirectory, err := windowsMarkerText(defaultResult.Stdout, "AIS_DEFAULT_CWD=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profileDirectory, err := windows.KnownFolderPath(windows.FOLDERID_Profile, windows.KF_FLAG_DEFAULT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultInfo, defaultErr := os.Stat(defaultDirectory)
+	profileInfo, profileErr := os.Stat(profileDirectory)
+	if defaultErr != nil || profileErr != nil || !os.SameFile(defaultInfo, profileInfo) {
+		t.Fatalf("default PowerShell cwd %q is not user Profile %q: default_err=%v profile_err=%v",
+			defaultDirectory, profileDirectory, defaultErr, profileErr)
+	}
 	missingDirectory := filepath.Join(directory, "missing")
 	if _, err := fixture.dialer.Exec(
 		context.Background(), fixture.deviceID, "exit 0",
