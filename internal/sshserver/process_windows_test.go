@@ -77,11 +77,11 @@ func TestWindowsPowerShellExecRepeatedlyClosesNativeHandles(t *testing.T) {
 	}
 	command := `[Console]::Out.Write("stdout"); [Console]::Error.Write("stderr")`
 	// Exclude bounded process-wide initialization by Go and the complete
-	// stdout/stderr pump path from the leak slope. The Windows runner has shown
-	// that its pipe runtime may grow a small handle cache during the second
-	// batch, so calibrate through two identical batches before measuring twice
-	// that sample. A real per-exec leak continues growing across the observation
-	// window instead of converging after calibration.
+	// stdout/stderr pump path from the leak slope. Blocking Windows pipe/process
+	// calls can make the Go runtime retain a small, bounded set of worker-thread
+	// handles even after identical warm-up calls. Measure two equal observation
+	// windows: bounded runtime growth must stay small in the first and converge
+	// in the second, while a per-exec leak keeps climbing in both windows.
 	for attempt := 0; attempt < 8; attempt++ {
 		run(command)
 	}
@@ -95,14 +95,24 @@ func TestWindowsPowerShellExecRepeatedlyClosesNativeHandles(t *testing.T) {
 	for attempt := 0; attempt < 16; attempt++ {
 		run(command)
 	}
-	after, err := windowsCurrentProcessHandleCount()
+	firstObserved, err := windowsCurrentProcessHandleCount()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after > calibrated+3 {
-		t.Fatalf("PowerShell handle count kept growing after calibration: %d to %d", calibrated, after)
+	if firstObserved > calibrated+8 {
+		t.Fatalf("PowerShell handle count exceeded bounded runtime growth: %d to %d", calibrated, firstObserved)
 	}
-	t.Logf("PowerShell handle count converged after calibration: %d to %d", calibrated, after)
+	for attempt := 0; attempt < 16; attempt++ {
+		run(command)
+	}
+	settled, err := windowsCurrentProcessHandleCount()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settled > firstObserved+3 {
+		t.Fatalf("PowerShell handle count did not converge: %d to %d to %d", calibrated, firstObserved, settled)
+	}
+	t.Logf("PowerShell handle count converged across equal windows: %d to %d to %d", calibrated, firstObserved, settled)
 }
 
 func TestWindowsConPTYShellRepeatedlyClosesNativeHandles(t *testing.T) {
