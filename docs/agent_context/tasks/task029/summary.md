@@ -113,8 +113,34 @@ cross-machine Browser login -> pairing -> DSH -> Windows run. That literal
 deployment proof remains a release gate because isolated GitHub jobs provide
 no shared private cross-OS network or persistent Server.
 
-ASD was not accessed or modified. The artifact remains an unsigned engineering
-ZIP. Clean Windows 11 and Windows 10 22H2 desktop runs, second-logon rejection,
+At the implementation handoff ASD had not been accessed; the later deployment
+is recorded below. The artifact remains an unsigned engineering ZIP. Clean
+Windows 11 and Windows 10 22H2 desktop runs, second-logon rejection,
 installer/upgrade/uninstall, Authenticode and the final public deployment E2E
 remain open. ADR-0007 therefore stays Proposed, and this handoff requests human
 review rather than asserting approval.
+
+## ASD Deployment Follow-up (2026-09-08)
+
+After the implementation review handoff, the reviewed Server binary was
+deployed to ASD as `aisummoner-task029-server-20260908T1838Z.service`.
+The service runs as `myself:myself` from the dedicated
+`/home/myself/.local/opt/aisummoner-task029/20260908T1838Z` directory, while
+reusing the existing Task011 `server.env` and SQLite database. The candidate
+SHA-256 is
+`ffee448d0ed1e3f059886adb06d123257642fd10cd6546af418b519c9a8d61c3`.
+
+The old Task011 Server unit is stopped but retained. A mode-0700 rollback
+directory contains the previous binary, unit metadata, environment copy and
+hash manifest. The new process owns the only `127.0.0.1:8088` listener;
+DSH, its Capability Bridge and OpenCode remained available, and unrelated
+containers were not changed. Both local and public health checks returned
+`{"status":"ok"}` and the deployed Web asset hashes match the build.
+
+The expired public certificate was renewed through the existing pinned
+Certbot lineage and installed into the existing Caddy container. The active
+certificate carries the exact `IP:122.51.70.33` SAN and expires
+2026-09-14 23:31:44 UTC. The renewal helper's self-IP check failed as
+expected on ASD and rolled back; a local `--resolve` verification was then
+used before keeping the renewed certificate active. External strict curl to
+`https://122.51.70.33:10001/healthz` returned HTTP 200.

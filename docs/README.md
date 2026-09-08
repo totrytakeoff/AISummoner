@@ -46,6 +46,7 @@
 - [MVP-0 三机验收](acceptance/mvp-0-2026-08-13.md)
 - [Task011 测试部署](acceptance/task011-test-deployment-2026-08-21.md)
 - [Task014 Web Key 入口](acceptance/task014-web-key-entry-2026-08-23.md)
+- [Task029 ASD Server 部署](acceptance/task029-server-deployment-2026-09-08.md)
 
 带 `cleanup`、`unblock` 的文件保留当时的故障、回滚和环境事实，用于审计历史。
 
