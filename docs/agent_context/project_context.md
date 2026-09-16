@@ -81,7 +81,10 @@ the next product work is richer Runtime compatibility and release validation.
   Task011 environment/database and DSH/OpenCode sidecars. The former Task011
   Server unit remains stopped with a recorded rollback copy. Caddy serves the
   current Web build on `https://122.51.70.33:10001`; its Let's Encrypt IP
-  certificate was renewed on 2026-09-08 and expires 2026-09-14.
+  certificate was activated on 2026-09-16 (cert8, expires 2026-09-22) after
+  Task030 repaired the renewal helper's public self-loop verification. The
+  helper now verifies over loopback `--resolve` and warns when the serving
+  cert is within 2 days of expiry.
 - DSH and OpenCode call a Go loopback Capability Bridge; direct DeepSeek uses
   the same Go `RemoteExecInvoker`. In every case the target Device is derived
   from the owned AISummoner Session, never model input.

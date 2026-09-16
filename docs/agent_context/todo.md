@@ -122,6 +122,15 @@ updated_by: coder
 - [x] task029 (ready for review): complete the trusted target/PowerShell profile,
   target-aware cwd and pinned DSH tool-Turn evidence without changing other
   Runtime adapters or claiming public Windows support.
+- [x] task030 (ready for review): repaired ASD public TLS activation and the
+  `renew-public-cert.sh` public self-loop check. Serving cert restored to
+  cert8 (expires 2026-09-22), helper now verifies over loopback `--resolve`,
+  plus a 2-day expiry alarm. Transient-unit/reboot persistence and `task011`
+  naming residue remain open.
+- [ ] task031: ASD deployment hygiene — migrate transient `systemd-run` Server/
+  cert-renew units to persistent units, de-duplicate the `task011` naming
+  residue, review the unrelated distro `certbot.timer`, set Caddy restart
+  policy, and add a deployment smoke script.
 - [ ] Human-review Task029 and choose between the A5 OpenCode compatibility
   slice and the remaining Windows 11/10/signing/public-release gates.
 - [ ] Complete Task023's ordinary-user Windows 11/10, wrong-logon and clean-VM
