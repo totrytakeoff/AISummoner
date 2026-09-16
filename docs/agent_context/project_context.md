@@ -76,9 +76,12 @@ the next product work is richer Runtime compatibility and release validation.
   file-backed adapters must use managed-document atomic/rollback semantics.
 - Server is single-node and authoritative for user/device/session ownership.
 - Online Tunnel connections live only in memory.
-- The reviewed Task029 Server binary is deployed on ASD under
-  `aisummoner-task029-server-20260908T1838Z.service`, reusing the existing
-  Task011 environment/database and DSH/OpenCode sidecars. The former Task011
+- The reviewed Task029 Server binary is deployed on ASD under the persistent
+  `aisummoner-server.service` unit (run `20260908T1838Z`, source commit
+  `096cf52`), reusing the existing Task011 environment/database and
+  DSH/OpenCode sidecars. Task031 made the Server and certificate renewal
+  reboot-survivable (persistent units, Caddy/OpenCode `restart=unless-stopped`,
+  `deploy/asd-smoke.sh`, and a `deployment.info` record). The former Task011
   Server unit remains stopped with a recorded rollback copy. Caddy serves the
   current Web build on `https://122.51.70.33:10001`; its Let's Encrypt IP
   certificate was activated on 2026-09-16 (cert8, expires 2026-09-22) after

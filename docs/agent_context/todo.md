@@ -131,6 +131,12 @@ updated_by: coder
   cert-renew units to persistent units, de-duplicate the `task011` naming
   residue, review the unrelated distro `certbot.timer`, set Caddy restart
   policy, and add a deployment smoke script.
+- [x] task031 (ready for review): persistent `aisummoner-server.service` and
+  `aisummoner-cert-renew.timer` are enabled; Caddy/OpenCode
+  `restart=unless-stopped`; `deploy/asd-smoke.sh` deployed (11/11 PASS);
+  `deployment.info` written. Fixed a latent `root:root 0700` CHDIR defect on
+  the task029 runtime dirs. Naming residue and OpenCode container-Env secret
+  remain documented residuals.
 - [ ] Human-review Task029 and choose between the A5 OpenCode compatibility
   slice and the remaining Windows 11/10/signing/public-release gates.
 - [ ] Complete Task023's ordinary-user Windows 11/10, wrong-logon and clean-VM
