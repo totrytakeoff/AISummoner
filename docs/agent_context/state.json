@@ -2,12 +2,12 @@
   "workflow_id": "AISummoner-2026-08-12-001",
   "project": "AISummoner",
   "context_dir": "docs/agent_context",
-  "current_task": "task029",
+  "current_task": "task031",
   "current_stage": "review",
   "status": "awaiting_review",
   "iteration": 0,
-  "last_decision": "TASK029_IMPLEMENTATION_AND_HOSTED_CONTRACTS_READY_FOR_REVIEW",
+  "last_decision": "TASK029_AWAITING_REVIEW; TASK030_TLS_RENEWAL_REPAIR_DONE; TASK031_DEPLOYMENT_HYGIENE_DONE",
   "next_agent": "human_reviewer",
   "max_revisions_per_task": 3,
-  "updated_at": "2026-09-02T21:43:39+08:00"
+  "updated_at": "2026-09-17T11:03:00+08:00"
 }

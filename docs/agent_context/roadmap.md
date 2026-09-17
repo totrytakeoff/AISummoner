@@ -107,6 +107,14 @@ updated_by: coder
   real pinned DSH PowerShell tool loop. Hosted DSH and native Windows proofs
   meet at `RemoteExecInvoker`; clean Windows 11/10, a literal cross-machine
   Browser/pairing run, installer and Authenticode remain separate release gates.
+- [x] task030/task031 (ready for human review): ASD deployment/ops hygiene —
+  repaired the public TLS renewal helper's self-loop verification and
+  activated the already-issued certificate (serving cert expires 2026-09-22);
+  migrated Server and cert renewal to persistent systemd units, set
+  Caddy/OpenCode `restart=unless-stopped`, added `deploy/asd-smoke.sh` and a
+  `deployment.info` record, and fixed a latent `root:root 0700` CHDIR defect on
+  the task029 runtime dirs. `task011` naming residue and the OpenCode
+  container-Env secret remain documented residuals.
 - [ ] Structured Remote file read/search/write/patch/diff.
 - [ ] Remote local restrictive permissions.
 - [ ] Desktop viewing/input only after a dedicated threat model and ADR.
